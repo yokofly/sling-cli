@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"fmt"
 	"runtime/debug"
 	"strings"
 	"unicode"
@@ -197,8 +198,12 @@ func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
 		} else {
 			sql = t.SQL
 		}
+	} else if t.Dialect == dbio.TypeDbProton {
+		sql = g.F("select %s from table(%s)", fieldsStr, t.FDQN())
+		fmt.Println(sql)
 	} else {
 		sql = g.F("select %s from %s", fieldsStr, t.FDQN())
+		fmt.Println(sql)
 	}
 
 	if limit > 0 {

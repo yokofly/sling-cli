@@ -223,6 +223,28 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return
 	}
 
+	reservedColumns := []string{"_tp_time"} // Add other reserved names as needed
+
+	// Filter out reserved columns
+	filteredColumns := make([]iop.Column, 0, len(tableTmp.Columns))
+	for _, col := range tableTmp.Columns {
+		if !lo.Contains(reservedColumns, col.Name) {
+			filteredColumns = append(filteredColumns, col)
+		} else {
+			g.Warn("Column name '%s' is reserved and will be ignored", col.Name)
+		}
+	}
+
+	// Update the columns in both tableTmp and sampleData
+	tableTmp.Columns = filteredColumns
+	sampleData.Columns = filteredColumns
+
+	// Adjust column positions if necessary
+	for i := range tableTmp.Columns {
+		tableTmp.Columns[i].Position = i + 1
+		sampleData.Columns[i].Position = i + 1
+	}
+
 	_, err = createTableIfNotExists(tgtConn, sampleData, &tableTmp, true)
 	if err != nil {
 		err = g.Error(err, "could not create temp table "+tableTmp.FullName())

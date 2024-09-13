@@ -1102,6 +1102,7 @@ func (conn *BaseConn) ExecContext(ctx context.Context, q string, args ...interfa
 		return
 	}
 
+	fmt.Println(q, args)
 	if conn.tx != nil {
 		result, err = conn.tx.ExecContext(ctx, q, args...)
 		q = q + noDebugKey // just to not show twice the sql in error since tx does
