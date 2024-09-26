@@ -20,7 +20,9 @@ import (
 // ProtonConn is a Proton connection
 type ProtonConn struct {
 	BaseConn
-	URL string
+	URL              string
+	Idempotent       bool
+	IdempotentPrefix string
 }
 
 // Init initiates the object
@@ -53,6 +55,12 @@ func (conn *ProtonConn) ConnString() string {
 	}
 
 	return conn.BaseConn.ConnString()
+}
+
+// SetIdempotent enables or disables idempotent support
+func (conn *ProtonConn) SetIdempotent(enabled bool, prefix string) {
+	conn.Idempotent = enabled
+	conn.IdempotentPrefix = prefix
 }
 
 // NewTransaction creates a new transaction
@@ -132,6 +140,7 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		}
 	}
 
+	batchCount := 0
 	for batch := range ds.BatchChan {
 		if batch.ColumnsChanged() || batch.IsFirst() {
 			columns, err = conn.GetColumns(tableFName, batch.Columns.Names()...)
@@ -154,6 +163,10 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 			if err != nil {
 				return g.Error(err, "columns mismatch")
 			}
+
+			batchCount++
+			// Enable idempotent support with a specific prefix
+			conn.SetIdempotent(true, fmt.Sprintf("id_%d", batchCount))
 
 			insertStatement := conn.GenerateInsertStatement(
 				table.FullName(),
@@ -310,9 +323,21 @@ func (conn *ProtonConn) GenerateInsertStatement(tableName string, cols iop.Colum
 		tableName = table.NameQ()
 	}
 
+	settings := ""
+	if conn.Idempotent {
+		if len(conn.IdempotentPrefix) > 0 {
+			settings = fmt.Sprintf(" settings idempotent_id='%s'", conn.IdempotentPrefix)
+		} else {
+			// Use a default prefix with timestamp if not provided
+			defaultPrefix := fmt.Sprintf("default_%s", time.Now().Format("20060102"))
+			settings = fmt.Sprintf(" settings idempotent_id='%s'", defaultPrefix)
+		}
+	}
+
 	statement := g.R(
-		"insert into {table} ({fields}) values {values}",
+		"insert into {table} ({fields}) {settings} values {values}",
 		"table", tableName,
+		"settings", settings,
 		"fields", strings.Join(qFields, ", "),
 		"values", strings.TrimSuffix(valuesStr, ","),
 	)
