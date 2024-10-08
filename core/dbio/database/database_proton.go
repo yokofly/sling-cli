@@ -218,8 +218,7 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 
 	stmt, err := conn.Prepare(insertStatement)
 	if err != nil {
-		g.Trace("%s: %#v", table, columns.Names())
-		return g.Error(err, "could not prepare statement")
+		return g.Error(err, "could not prepare statement for table: %s, statement: %s", table.FullName(), insertStatement)
 	}
 	defer stmt.Close()
 
