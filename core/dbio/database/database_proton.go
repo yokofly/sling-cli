@@ -291,8 +291,7 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 		time.Sleep(1 * time.Millisecond)
 		ds.Context.Unlock()
 		if err != nil {
-			ds.Context.CaptureErr(g.Error(err, "could not insert into table %s", tableFName))
-			g.Trace("error for row: %#v", row)
+			ds.Context.CaptureErr(g.Error(err, "could not insert into table %s, row: %#v", tableFName, row))
 			return g.Error(err, "could not execute statement")
 		}
 	}
