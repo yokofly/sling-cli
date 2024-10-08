@@ -207,7 +207,7 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 	}
 
 	// Enable idempotent support with a specific prefix
-	idPrefix := fmt.Sprintf("batch_%d", batchCount)
+	idPrefix := fmt.Sprintf("%d_batch_%s", batchCount, time.Now().Format("20060102150405"))
 	conn.SetIdempotent(true, idPrefix)
 
 	insertStatement := conn.GenerateInsertStatement(
@@ -353,7 +353,7 @@ func (conn *ProtonConn) GenerateInsertStatement(tableName string, cols iop.Colum
 			settings = fmt.Sprintf(" settings idempotent_id='%s'", conn.IdempotentPrefix)
 		} else {
 			// Use a default prefix with timestamp if not provided
-			defaultPrefix := fmt.Sprintf("default_%s", time.Now().Format("20060102"))
+			defaultPrefix := time.Now().Format("20060102150405")
 			settings = fmt.Sprintf(" settings idempotent_id='%s'", defaultPrefix)
 		}
 	}
