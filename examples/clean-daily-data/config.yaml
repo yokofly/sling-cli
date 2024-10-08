@@ -1,0 +1,3 @@
+timeplusd_conn: proton://default@localhost:8463/default
+tables:
+  - trade_data

@@ -1,5 +1,7 @@
 timeplusd: 2.4.6 (other version shall work as well)
 
+
+# work with timeplusd cli
 ## prepare data
 ```sql
 CREATE STREAM trade_data
@@ -78,3 +80,28 @@ To automate the partition cleanup daily, you can set up a cron job. Here's how y
    - Replace `/path/to/cleanup_partitions.sh` with the actual path to your script.
    - Logs will be appended to `/var/log/cleanup_partitions.log`. Ensure the script has the necessary permissions to write to this file or choose an appropriate log location.
 
+
+
+
+
+# work with sling
+
+```bash
+sling clean-partitions -c config.yaml
+```
+
+## data preparation
+
+```sql
+insert into trade_data(trade_id, tradedate, source, symbol, price, quantity, trade_type, trader_id) values(1002, format_DateTime(now(), '%Y%m%d') ,'SNAP','GOOGL',140.25,50,'Sell','TRADER002')
+
+insert into trade_data(trade_id, tradedate, source, symbol, price, quantity, trade_type, trader_id) values(1002, format_DateTime(now(), '%Y%m%d') ,'COCO','GOOGL',140.25,50,'Sell','TRADER002')
+
+```
+
+## output
+```bash
+(base) ➜  sling-cli git:(feature/clean-daily-partition) ✗ ./sling clean-partitions -c  config.yaml
+8:18AM INF Dropped partition (20241008,'SNAP') from table trade_data
+8:18AM INF Dropped partition (20241008,'COCO') from table trade_data
+```
