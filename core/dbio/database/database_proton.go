@@ -438,7 +438,7 @@ func (conn *ProtonConn) GetNativeType(col iop.Column) (nativeType string, err er
 
 	// special case for _tp_time, Column _tp_time is reserved, expected type is non-nullable datetime64
 	if col.Name == "_tp_time" {
-		return "datetime64(3, 'UTC')", nil
+		return "datetime64(3, 'UTC') DEFAULT now64(3, 'UTC') CODEC(DoubleDelta, LZ4)", nil
 	}
 
 	return nativeType, err
