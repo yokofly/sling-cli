@@ -2884,11 +2884,20 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 		exprMap[strings.ToLower(col.Name)] = g.F("sum(%s)", expr)
 	}
 
-	sql := g.F(
-		"select %s from %s ",
-		strings.Join(exprs, ", "),
-		tableName,
-	)
+	var sql string
+	if conn.GetType() == dbio.TypeDbProton {
+		sql = g.F(
+			"select %s from table(%s) ",
+			strings.Join(exprs, ", "),
+			tableName,
+		)
+	} else {
+		sql = g.F(
+			"select %s from %s ",
+			strings.Join(exprs, ", "),
+			tableName,
+		)
+	}
 
 	data, err := conn.Self().Query(sql)
 	if err != nil {
