@@ -145,13 +145,19 @@ func (cfg *Config) SetDefault() {
 	case dbio.TypeDbBigQuery, dbio.TypeDbBigTable:
 		cfg.Source.Options.MaxDecimals = g.Int(9)
 		cfg.Target.Options.MaxDecimals = g.Int(9)
-	case dbio.TypeDbClickhouse, dbio.TypeDbProton:
+	case dbio.TypeDbClickhouse:
 		cfg.Source.Options.MaxDecimals = g.Int(11)
 		cfg.Target.Options.MaxDecimals = g.Int(11)
 		if cfg.Target.Options.BatchLimit == nil {
 			// set default batch_limit to limit memory usage. Bug in clickhouse driver?
 			// see https://github.com/ClickHouse/clickhouse-go/issues/1293
 			cfg.Target.Options.BatchLimit = g.Int64(100000)
+		}
+	case dbio.TypeDbProton:
+		cfg.Source.Options.MaxDecimals = g.Int(11)
+		cfg.Target.Options.MaxDecimals = g.Int(11)
+		if cfg.Target.Options.BatchLimit == nil {
+			cfg.Target.Options.BatchLimit = g.Int64(5000)
 		}
 	}
 
@@ -168,6 +174,8 @@ func (cfg *Config) SetDefault() {
 		cfg.extraTransforms = append(cfg.extraTransforms, "parse_bit")
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbBigQuery):
 		cfg.Target.Options.DatetimeFormat = "2006-01-02 15:04:05.000000-07"
+	case g.In(cfg.TgtConn.Type, dbio.TypeDbProton):
+		cfg.MetadataLoadedAt = g.Bool(false)
 	}
 
 	// set vars
