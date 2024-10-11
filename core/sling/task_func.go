@@ -193,12 +193,20 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 		return // target table does not exist
 	}
 
-	sql := g.F(
-		"select max(%s) as max_val from %s",
-		tgtConn.Quote(tgtUpdateKey, false),
-		table.FDQN(),
-	)
-
+	var sql string
+	if tgtConn.GetType() == dbio.TypeDbProton {
+		sql = g.F(
+			"select max(%s) as max_val from table(%s)",
+			tgtConn.Quote(tgtUpdateKey, false),
+			table.FDQN(),
+		)
+	} else {
+		sql = g.F(
+			"select max(%s) as max_val from %s",
+			tgtConn.Quote(tgtUpdateKey, false),
+			table.FDQN(),
+		)
+	}
 	data, err := tgtConn.Query(sql)
 	if err != nil {
 		errMsg := strings.ToLower(err.Error())
