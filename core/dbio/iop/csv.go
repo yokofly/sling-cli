@@ -525,7 +525,7 @@ func detectDelimiter(delimiter string, testBytes []byte) (bestDeli rune, numCols
 		deliSuggested = true
 	}
 
-	deliList := []rune{',', '\t', '|', ';'}
+	deliList := []rune{',', '\t', '|', ';', '~'}
 	if deliSuggested {
 		deliList = append([]rune{bestDeli}, deliList...)
 	}
