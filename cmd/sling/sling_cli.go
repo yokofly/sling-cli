@@ -339,6 +339,20 @@ var cliCloud = &g.CliSC{
 	ExecProcess: processCloud,
 }
 
+var cliCleanPartitions = &g.CliSC{
+	Name:        "clean-partitions",
+	Description: "Clean daily data for Timeplusd (Proton) tables",
+	Flags: []g.Flag{
+		{
+			Name:        "config",
+			ShortName:   "c",
+			Type:        "string",
+			Description: "The configuration file to use (YAML).",
+		},
+	},
+	ExecProcess: processCleanPartitions,
+}
+
 func init() {
 
 	if val := os.Getenv("SLING_DISABLE_TELEMETRY"); val != "" {
@@ -352,6 +366,7 @@ func init() {
 	cliConns.Make().Add()
 	cliRun.Make().Add()
 	cliUpdate.Make().Add()
+	cliCleanPartitions.Make().Add()
 
 	if projectID == "" {
 		projectID = os.Getenv("GITHUB_REPOSITORY_ID")
