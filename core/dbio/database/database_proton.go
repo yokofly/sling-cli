@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
+	"github.com/timeplus-io/proton-go-driver/v2"
 	_ "github.com/timeplus-io/proton-go-driver/v2"
 
 	"github.com/flarco/g"
@@ -29,10 +31,38 @@ type ProtonConn struct {
 	URL              string
 	Idempotent       bool
 	IdempotentPrefix string
+	ProtonConn       proton.Conn
 }
 
 // Init initiates the object
 func (conn *ProtonConn) Init() error {
+	u, err := url.Parse(conn.URL)
+	if err != nil {
+		return g.Error(err, "could not parse Proton URL")
+	}
+
+	host := u.Hostname()
+	port := u.Port()
+	if port == "" {
+		port = "8463" // default Proton port
+	}
+
+	username := u.User.Username()
+	password, _ := u.User.Password() // Password might be empty
+	database := strings.TrimPrefix(u.Path, "/")
+
+	conn.ProtonConn, err = proton.Open(&proton.Options{
+		Addr: []string{fmt.Sprintf("%s:%s", host, port)},
+		Auth: proton.Auth{
+			Database: database,
+			Username: username,
+			Password: password, // This might be an empty string
+		},
+		DialTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		return g.Error(err, "could not connect to proton")
+	}
 
 	conn.BaseConn.URL = conn.URL
 	conn.BaseConn.Type = dbio.TypeDbProton
@@ -216,11 +246,10 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 		1,
 	)
 
-	stmt, err := conn.Prepare(insertStatement)
+	batched, err := conn.ProtonConn.PrepareBatch(ds.Context.Ctx, insertStatement)
 	if err != nil {
 		return g.Error(err, "could not prepare statement for table: %s, statement: %s", table.FullName(), insertStatement)
 	}
-	defer stmt.Close()
 
 	decimalCols := []int{}
 	intCols := []int{}
@@ -286,13 +315,16 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 		*count++
 		// Do insert
 		ds.Context.Lock()
-		_, err := stmt.Exec(row...)
-		time.Sleep(1 * time.Millisecond)
+		err = batched.Append(row...)
 		ds.Context.Unlock()
 		if err != nil {
 			ds.Context.CaptureErr(g.Error(err, "could not insert into table %s, row: %#v", tableFName, row))
 			return g.Error(err, "could not execute statement")
 		}
+	}
+	err = batched.Send()
+	if err != nil {
+		return g.Error(err, "could not send batch data")
 	}
 
 	err = conn.Commit()
