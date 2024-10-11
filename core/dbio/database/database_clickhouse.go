@@ -239,6 +239,7 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 				// Do insert
 				ds.Context.Lock()
 				_, err := stmt.Exec(row...)
+				time.Sleep(1 * time.Millisecond)
 				ds.Context.Unlock()
 				if err != nil {
 					ds.Context.CaptureErr(g.Error(err, "could not COPY into table %s", tableFName))
