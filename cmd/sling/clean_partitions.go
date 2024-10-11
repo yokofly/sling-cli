@@ -12,7 +12,7 @@ import (
 )
 
 type CleanPartitionsConfig struct {
-	TimePlusDConn string   `yaml:"timeplusd_conn"`
+	TimeplusdConn string   `yaml:"timeplusd_conn"`
 	Tables        []string `yaml:"tables"`
 }
 
@@ -57,7 +57,7 @@ func readCleanPartitionsConfig(configPath string) (*CleanPartitionsConfig, error
 
 func runCleanPartitions(cfg *CleanPartitionsConfig) error {
 	// Connect to TimePlusD
-	conn, err := database.NewConn(cfg.TimePlusDConn)
+	conn, err := database.NewConn(cfg.TimeplusdConn)
 	if err != nil {
 		return g.Error(err, "Error connecting to TimePlusD")
 	}
