@@ -303,7 +303,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// set OnColumnAdded
-	if *cfg.Target.Options.AddNewColumns {
+	if *cfg.Target.Options.AddNewColumns && cfg.Target.Type != dbio.TypeDbProton {
 		df.OnColumnAdded = func(col iop.Column) error {
 
 			// sleep to allow transaction to close
@@ -427,7 +427,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 
 		if !created && cfg.Mode != FullRefreshMode {
-			if *cfg.Target.Options.AddNewColumns {
+			if *cfg.Target.Options.AddNewColumns && cfg.Target.Type != dbio.TypeDbProton {
 				ok, err := tgtConn.AddMissingColumns(targetTable, sample.Columns)
 				if err != nil {
 					return cnt, g.Error(err, "could not add missing columns")
