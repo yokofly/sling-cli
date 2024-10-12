@@ -1,0 +1,46 @@
+project_name: sling-timeplus
+
+before:
+  hooks:
+    - go mod edit -dropreplace='github.com/flarco/g' go.mod
+    - go mod edit -dropreplace='github.com/slingdata-io/sling' go.mod
+    - go mod edit -droprequire='github.com/slingdata-io/sling' go.mod
+    - go mod tidy
+
+builds:
+  - main: ./cmd/sling
+    env:
+      - CGO_ENABLED=0
+    tags:
+      - fts5
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - "-X 'github.com/timeplus-io/sling-cli/core.Version={{.Version}}'"
+
+archives:
+  - format: zip
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+
+checksum:
+  name_template: '{{ .ProjectName }}_{{ .Version }}_SHA256SUMS'
+  algorithm: sha256
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+release:
+  github:
+    owner: timeplus-io
+    name: sling-cli
