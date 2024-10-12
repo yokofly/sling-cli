@@ -247,6 +247,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	df.Columns = sampleData.Columns
 	setStage("4 - load-into-temp")
 
+	if tgtConn.GetType() == dbio.TypeDbProton {
+		// proton needs time to create the table
+		time.Sleep(2 * time.Second)
+	}
+
 	t.AddCleanupTaskFirst(func() {
 		if cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
 			return
@@ -466,6 +471,12 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	// Put data from tmp to final
 	setStage("5 - load-into-final")
+
+	if tgtConn.GetType() == dbio.TypeDbProton {
+		// proton needs time to create the table
+		time.Sleep(2 * time.Second)
+	}
+
 	if cnt == 0 {
 		t.SetProgress("0 rows inserted. Nothing to do.")
 	} else if cfg.Mode == "drop (need to optimize temp table in place)" {

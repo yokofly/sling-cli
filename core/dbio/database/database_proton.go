@@ -268,6 +268,8 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 		}
 	}
 
+	// Counter for successfully inserts within this batch
+	var internalCount uint64
 	for row := range batch.Rows {
 		var eG g.ErrorGroup
 
@@ -312,7 +314,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 			return err
 		}
 
-		*count++
 		// Do insert
 		ds.Context.Lock()
 		err = batched.Append(row...)
@@ -321,6 +322,7 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 			ds.Context.CaptureErr(g.Error(err, "could not insert into table %s, row: %#v", tableFName, row))
 			return g.Error(err, "could not execute statement")
 		}
+		internalCount++
 	}
 	err = batched.Send()
 	if err != nil {
@@ -332,6 +334,7 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 		return g.Error(err, "could not commit transaction")
 	}
 
+	*count += internalCount
 	return nil
 }
 
