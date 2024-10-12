@@ -19,6 +19,9 @@ builds:
     goarch:
       - amd64
       - arm64
+    ignore:
+      - goos: linux
+        goarch: arm64
     ldflags:
       - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Version}}'"
     overrides:
