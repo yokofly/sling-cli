@@ -29,8 +29,8 @@ jobs:
         run: |
           git config user.name github-action
           git config user.email github-actions@github.com
-          git tag ${{ github.event.inputs.tag }}
-          git push origin ${{ github.event.inputs.tag }}
+          git tag ${{ github.event.inputs.version }}
+          git push origin ${{ github.event.inputs.version }}
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v5
