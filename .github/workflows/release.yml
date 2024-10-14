@@ -12,10 +12,10 @@ on:
         default: 'v1.0.0'
 
 jobs:
-  goreleaser:
+  release:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4.2.1
         with:
           fetch-depth: 0
@@ -24,6 +24,13 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+
+      - name: Create and push tag
+        run: |
+          git config user.name github-action
+          git config user.email github-actions@github.com
+          git tag ${{ github.event.inputs.tag }}
+          git push origin ${{ github.event.inputs.tag }}
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v5
