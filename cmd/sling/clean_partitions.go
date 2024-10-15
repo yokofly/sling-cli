@@ -85,7 +85,7 @@ func cleanTablePartitions(conn database.Connection, table, date string) error {
 	for _, partition := range partitions {
 		err := dropPartition(conn, table, partition)
 		if err != nil {
-			g.Error("Failed to drop partition %s from table %s: %v", partition, table, err)
+			g.Error(err, "Failed to drop partition %s from table %s", partition, table)
 		} else {
 			g.Info("Successfully dropped partition %s from table %s", partition, table)
 		}

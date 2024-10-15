@@ -150,7 +150,7 @@ func retry(attempts int, sleep time.Duration, f func() error) (err error) {
 			return nil
 		}
 
-		g.Error("Attempt %d failed: %v", i+1, err)
+		g.Error(err, "Attempt %d failed", i+1)
 
 		if i < attempts-1 { // don't sleep after the last attempt
 			g.Info("Sleeping for %v before next attempt", sleep)
