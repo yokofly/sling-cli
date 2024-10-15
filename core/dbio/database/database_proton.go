@@ -20,9 +20,9 @@ import (
 )
 
 const (
-	maxRetries        = 3
+	maxRetries        = 4
 	retryDelay        = 5 * time.Second
-	countWaitDuration = 3300 * time.Millisecond
+	countWaitDuration = 5 * time.Second
 )
 
 // ProtonConn is a Proton connection
@@ -144,19 +144,18 @@ func (conn *ProtonConn) GenerateDDL(table Table, data iop.Dataset, temporary boo
 
 // Define a helper function for retrying operations
 func retry(attempts int, sleep time.Duration, f func() error) (err error) {
-	for i := 0; ; i++ {
+	for i := 0; i < attempts; i++ {
 		err = f()
 		if err == nil {
 			return nil
 		}
 
-		if i >= (attempts - 1) {
-			break
+		g.Error("Attempt %d failed: %v", i+1, err)
+
+		if i < attempts-1 { // don't sleep after the last attempt
+			g.Info("Sleeping for %v before next attempt", sleep)
+			time.Sleep(sleep)
 		}
-
-		time.Sleep(sleep)
-
-		g.Info("Retrying after error: %v", err)
 	}
 	return fmt.Errorf("after %d attempts, last error: %s", attempts, err)
 }
@@ -210,9 +209,12 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		})
 
 		if err != nil {
+			g.Error("Failed to process batch %d after %d retries: %v", batchCount, maxRetries, err)
 			return count, g.Error(err, "could not copy data after retries")
 		}
 	}
+
+	g.Info("Bulk import completed: %d batches, %d rows", batchCount, count)
 
 	ds.SetEmpty()
 
@@ -348,12 +350,15 @@ func (conn *ProtonConn) ExecContext(ctx context.Context, q string, args ...inter
 			return
 		}
 
+		g.Warn("Error executing query (attempt %d): %v", retries+1, err)
+
 		retries++
 		if retries >= maxRetries {
+			g.Error("Max retries reached. Last error: %v", err)
 			return
 		}
 
-		g.Info("Error (%s). Sleep 5 sec and retry", err.Error())
+		g.Info("Sleeping for %v(sec) before retry", retryDelay.Seconds())
 		time.Sleep(retryDelay)
 	}
 }
