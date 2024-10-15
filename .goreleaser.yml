@@ -22,6 +22,8 @@ builds:
     ldflags:
       - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Version}}-timeplus'"
 
+git:
+  prerelease_suffix: "-rc"
 archives:
   - format: zip
     name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
@@ -41,6 +43,7 @@ changelog:
       - '^test:'
 
 release:
+  prerelease: auto
   github:
     owner: yokofly
     name: sling-cli
