@@ -493,9 +493,11 @@ func cliInit(done chan struct{}) int {
 	setSentry()
 	ok, err := g.CliProcess()
 
-	if time.Now().UnixMicro()%20 == 0 {
-		defer SlingMedia.PrintFollowUs()
-	}
+	checkUpdate(false)
+	// I am not ready to show follow us yet
+	// if time.Now().UnixMicro()%20 == 0 {
+	// 	defer SlingMedia.PrintFollowUs()
+	// }
 
 	if err != nil || env.TelMap["error"] != nil {
 		if err == nil && env.TelMap["error"] != nil {
