@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/flarco/g"
@@ -59,9 +60,12 @@ func runCleanPartitions(cfg *CleanPartitionsConfig) error {
 	defer conn.Close()
 
 	today := time.Now().Format("20060102")
+	datePatterns := generateDatePatterns(today)
+	patternClauses := generatePatternClauses(datePatterns)
+	joinedPatternClauses := strings.Join(patternClauses, " OR ")
 
 	for _, table := range cfg.Tables {
-		err := cleanTablePartitions(conn, table, today)
+		err := cleanTablePartitions(conn, table, today, joinedPatternClauses)
 		if err != nil {
 			g.Warn("Error cleaning partitions for table %s: %v", table, err)
 		}
@@ -70,8 +74,31 @@ func runCleanPartitions(cfg *CleanPartitionsConfig) error {
 	return nil
 }
 
-func cleanTablePartitions(conn database.Connection, table, date string) error {
-	partitions, err := getPartitions(conn, table, date)
+func generateDatePatterns(date string) []string {
+	dateObj, err := time.Parse("20060102", date)
+	if err != nil {
+		g.Warn("Invalid date format: %s. Expected YYYYMMDD", date)
+		return []string{date}
+	}
+
+	return []string{
+		dateObj.Format("20060102"),   // YYYYMMDD
+		dateObj.Format("2006-01-02"), // YYYY-MM-DD
+		dateObj.Format("2006_01_02"), // YYYY_MM_DD
+		dateObj.Format("2006/01/02"), // YYYY/MM/DD
+	}
+}
+
+func generatePatternClauses(datePatterns []string) []string {
+	patternClauses := make([]string, len(datePatterns))
+	for i, pattern := range datePatterns {
+		patternClauses[i] = fmt.Sprintf("partition LIKE '%%%s%%'", pattern)
+	}
+	return patternClauses
+}
+
+func cleanTablePartitions(conn database.Connection, table, date, joinedPatternClauses string) error {
+	partitions, err := getPartitions(conn, table, joinedPatternClauses)
 	if err != nil {
 		return g.Error(err, "Error getting partitions for table: %s", table)
 	}
@@ -96,13 +123,13 @@ func cleanTablePartitions(conn database.Connection, table, date string) error {
 	return nil
 }
 
-func getPartitions(conn database.Connection, table, date string) ([]string, error) {
+func getPartitions(conn database.Connection, table, joinedPatternClauses string) ([]string, error) {
 	query := fmt.Sprintf(`
-		SELECT partition
+		SELECT DISTINCT partition
 		FROM system.parts
 		WHERE table = '%s'
-		  AND partition LIKE '%%%s%%'
-	`, table, date)
+		  AND (%s)
+	`, table, joinedPatternClauses)
 
 	data, err := conn.Query(query)
 	if err != nil {
