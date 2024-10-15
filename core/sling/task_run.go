@@ -45,7 +45,7 @@ func init() {
 func (t *TaskExecution) Execute() error {
 
 	// Force SLING_PROCESS_BW to false for Proton issue https://github.com/flarco/g/issues/1
-	if t.Config.Target.Type == dbio.TypeDbProton {
+	if t.Config.Target.Type == dbio.TypeDbProton || t.Config.Source.Type == dbio.TypeDbProton {
 		g.Debug("Force SLING_PROCESS_BW to false for timeplus database")
 		os.Setenv("SLING_PROCESS_BW", "false")
 	}
