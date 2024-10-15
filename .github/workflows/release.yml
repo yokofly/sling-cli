@@ -25,12 +25,26 @@ jobs:
         with:
           go-version: '1.22'
 
+      - name: Set version
+        run: |
+          VERSION=$(echo "${{ github.event.inputs.version }}" | sed 's/^v//')
+          if [ "${{ github.event.inputs.is_prerelease }}" == "true" ]; then
+            LATEST_ALPHA=$(git tag -l "${VERSION}-alpha-*" | sort -V | tail -n 1)
+            if [ -z "$LATEST_ALPHA" ]; then
+              BUILD_NUMBER=1
+            else
+              BUILD_NUMBER=$(echo $LATEST_ALPHA | awk -F'-' '{print $NF+1}')
+            fi
+            VERSION="${VERSION}-alpha-${BUILD_NUMBER}"
+          fi
+          echo "RELEASE_VERSION=${VERSION}" >> $GITHUB_ENV
+
       - name: Create and push tag
         run: |
           git config user.name github-action
           git config user.email github-actions@github.com
-          git tag ${{ github.event.inputs.version }}
-          git push origin ${{ github.event.inputs.version }}
+          git tag "v${RELEASE_VERSION}"
+          git push origin "v${RELEASE_VERSION}"
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v5
