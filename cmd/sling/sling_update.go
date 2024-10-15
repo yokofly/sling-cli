@@ -171,6 +171,12 @@ func upgradeScoop() (err error) {
 }
 
 func checkUpdate(force bool) {
+	// do not check update for timeplus version
+	if strings.Contains(core.Version, "timeplus") {
+		g.Debug("Using Timeplus version, skipping update check")
+		return
+	}
+
 	if core.Version == "dev" {
 		return
 	} else if time.Now().Second()%4 != 0 && !force {
