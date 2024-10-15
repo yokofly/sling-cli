@@ -214,8 +214,6 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		}
 	}
 
-	g.Info("Bulk import completed: %d batches, %d rows", batchCount, count)
-
 	ds.SetEmpty()
 
 	g.Debug("%d ROWS COPIED", count)

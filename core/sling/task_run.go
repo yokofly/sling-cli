@@ -44,6 +44,12 @@ func init() {
 // This may be a file/db to file/db transfer
 func (t *TaskExecution) Execute() error {
 
+	// Force SLING_PROCESS_BW to false for Proton issue https://github.com/flarco/g/issues/1
+	if t.Config.Target.Type == dbio.TypeDbProton {
+		g.Debug("Force SLING_PROCESS_BW to false for timeplus database")
+		os.Setenv("SLING_PROCESS_BW", "false")
+	}
+
 	done := make(chan struct{})
 	now := time.Now()
 	t.StartTime = &now
