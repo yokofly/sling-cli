@@ -243,6 +243,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return
 	}
 	cfg.Target.Options.TableDDL = g.String(tableTmp.DDL)
+	defer func() {
+		// reset table ddl (when retrying)
+		cfg.Target.Options.TableDDL = nil
+	}()
+
 	cfg.Target.TmpTableCreated = true
 	df.Columns = sampleData.Columns
 	setStage("4 - load-into-temp")
