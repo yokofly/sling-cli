@@ -365,7 +365,7 @@ func init() {
 
 	cliConns.Make().Add()
 	cliRun.Make().Add()
-	cliUpdate.Make().Add()
+	// cliUpdate.Make().Add()
 	cliCleanPartitions.Make().Add()
 
 	if projectID == "" {
@@ -508,9 +508,10 @@ func cliInit(done chan struct{}) int {
 	setSentry()
 	ok, err := g.CliProcess()
 
-	if time.Now().UnixMicro()%20 == 0 {
-		defer SlingMedia.PrintFollowUs()
-	}
+	// I am not ready to show follow us yet @yokofly
+	// if time.Now().UnixMicro()%20 == 0 {
+	// 	defer SlingMedia.PrintFollowUs()
+	// }
 
 	if err != nil || env.TelMap["error"] != nil {
 		if err == nil && env.TelMap["error"] != nil {
