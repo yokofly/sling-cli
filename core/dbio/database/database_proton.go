@@ -454,6 +454,9 @@ func processProtonInsertRow(columns iop.Columns, row []any) []any {
 
 // GetCount returns count of records
 func (conn *ProtonConn) GetCount(tableFName string) (uint64, error) {
+	// Add another sleep, reason: after insert table we try to getcount directly to ensure no record missing
+	// but proton seems not fully ready to get count.
+	time.Sleep(countWaitDuration)
 	var count uint64
 
 	// Retry logic to handle occasional zero count, likely due to database latency or transactional delays.
