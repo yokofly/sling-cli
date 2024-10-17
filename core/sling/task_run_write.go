@@ -169,7 +169,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			}
 
 			// some weird column / commit error, not picking up latest columns
-			suffix2 := g.RandString(g.NumericRunes, 1) + g.RandString(g.AplhanumericRunes, 1)
+			suffix2 := g.RandString(g.NumericRunes, 1) + g.RandString(g.AlphaNumericRunes, 1)
 			suffix2 = lo.Ternary(
 				tgtConn.GetType().DBNameUpperCase(),
 				strings.ToUpper(suffix2),
@@ -243,19 +243,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return
 	}
 	cfg.Target.Options.TableDDL = g.String(tableTmp.DDL)
-	defer func() {
-		// reset table ddl (when retrying)
-		cfg.Target.Options.TableDDL = nil
-	}()
-
 	cfg.Target.TmpTableCreated = true
 	df.Columns = sampleData.Columns
 	setStage("4 - load-into-temp")
-
-	if tgtConn.GetType() == dbio.TypeDbProton {
-		// proton needs time to create the table
-		time.Sleep(2 * time.Second)
-	}
 
 	t.AddCleanupTaskFirst(func() {
 		if cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
@@ -308,7 +298,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// set OnColumnAdded
-	if *cfg.Target.Options.AddNewColumns && cfg.Target.Type != dbio.TypeDbProton {
+	if *cfg.Target.Options.AddNewColumns {
 		df.OnColumnAdded = func(col iop.Column) error {
 
 			// sleep to allow transaction to close
@@ -432,7 +422,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 
 		if !created && cfg.Mode != FullRefreshMode {
-			if *cfg.Target.Options.AddNewColumns && cfg.Target.Type != dbio.TypeDbProton {
+			if *cfg.Target.Options.AddNewColumns {
 				ok, err := tgtConn.AddMissingColumns(targetTable, sample.Columns)
 				if err != nil {
 					return cnt, g.Error(err, "could not add missing columns")
@@ -476,12 +466,6 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	// Put data from tmp to final
 	setStage("5 - load-into-final")
-
-	if tgtConn.GetType() == dbio.TypeDbProton {
-		// proton needs time to create the table
-		time.Sleep(2 * time.Second)
-	}
-
 	if cnt == 0 {
 		t.SetProgress("0 rows inserted. Nothing to do.")
 	} else if cfg.Mode == "drop (need to optimize temp table in place)" {
