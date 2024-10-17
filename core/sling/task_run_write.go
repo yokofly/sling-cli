@@ -193,6 +193,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	df.Columns = sampleData.Columns
 	setStage("4 - load-into-temp")
 
+	if cfg.Target.Type == dbio.TypeDbProton {
+		// proton needs time to create the table
+		time.Sleep(2 * time.Second)
+	}
+
 	// Add cleanup task for temp table
 	t.AddCleanupTaskFirst(func() {
 		if cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
@@ -311,6 +316,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// Put data from tmp to final
 	setStage("5 - load-into-final")
 
+	if cfg.Target.Type == dbio.TypeDbProton {
+		// proton needs time to create the table
+		time.Sleep(2 * time.Second)
+	}
+
 	// Transfer data from temp to final table
 	if cnt == 0 {
 		t.SetProgress("0 rows inserted. Nothing to do.")
@@ -390,7 +400,7 @@ func initializeTempTable(cfg *Config, tgtConn database.Connection, targetTable d
 			}
 
 			// some weird column / commit error, not picking up latest columns
-			suffix2 := g.RandString(g.NumericRunes, 1) + g.RandString(g.AlphaNumericRunes, 1)
+			suffix2 := g.RandString(g.NumericRunes, 1) + g.RandString(g.AplhanumericRunes, 1)
 			suffix2 = lo.Ternary(
 				tgtConn.GetType().DBNameUpperCase(),
 				strings.ToUpper(suffix2),
@@ -476,7 +486,7 @@ func configureColumnHandlers(t *TaskExecution, cfg *Config, df *iop.Dataflow, tg
 	}
 
 	// set OnColumnAdded handler if adding new columns is enabled
-	if cfg.Target.Options.AddNewColumns != nil && *cfg.Target.Options.AddNewColumns {
+	if cfg.Target.Options.AddNewColumns != nil && *cfg.Target.Options.AddNewColumns && cfg.Target.Type != dbio.TypeDbProton {
 		df.OnColumnAdded = func(col iop.Column) error {
 
 			// sleep to allow transaction to close
@@ -549,7 +559,7 @@ func prepareFinal(
 	// If the table wasn't created and we're not in Full Refresh Mode, handle schema updates
 	if !created && cfg.Mode != FullRefreshMode {
 		// Add missing columns if the option is enabled
-		if cfg.Target.Options.AddNewColumns != nil && *cfg.Target.Options.AddNewColumns {
+		if cfg.Target.Options.AddNewColumns != nil && *cfg.Target.Options.AddNewColumns && cfg.Target.Type != dbio.TypeDbProton {
 			if ok, err := tgtConn.AddMissingColumns(targetTable, sample.Columns); err != nil {
 				return cnt, g.Error(err, "could not add missing columns")
 			} else if ok {
