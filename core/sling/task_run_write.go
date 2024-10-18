@@ -370,6 +370,16 @@ func (t *TaskExecution) writeDirectly(cfg *Config, df *iop.Dataflow, tgtConn dat
 		return 0, err
 	}
 
+	if cfg.Target.Type == dbio.TypeDbProton && cfg.Mode == IncrementalMode {
+		existed, err := database.TableExists(tgtConn, targetTable.FullName())
+		if err != nil {
+			return 0, g.Error(err, "could not check if final table exists in incremental mode")
+		}
+		if !existed {
+			return 0, g.Error(err, "final table %s not found in incremental mode, please create table %s first", targetTable.FullName(), targetTable.FullName())
+		}
+	}
+
 	// Pause dataflow to set up DDL and handlers
 	if paused := df.Pause(); !paused {
 		err = g.Error(err, "could not pause streams to infer columns")
