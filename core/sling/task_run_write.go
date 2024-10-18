@@ -373,10 +373,12 @@ func (t *TaskExecution) writeDirectly(cfg *Config, df *iop.Dataflow, tgtConn dat
 	if cfg.Target.Type == dbio.TypeDbProton && cfg.Mode == IncrementalMode {
 		existed, err := database.TableExists(tgtConn, targetTable.FullName())
 		if err != nil {
-			return 0, g.Error(err, "could not check if final table exists in incremental mode")
+			err = g.Error(err, "could not check if final table exists in incremental mode")
+			return 0, err
 		}
 		if !existed {
-			return 0, g.Error(err, "final table %s not found in incremental mode, please create table %s first", targetTable.FullName(), targetTable.FullName())
+			err = g.Error("final table %s not found in incremental mode, please create table %s first", targetTable.FullName(), targetTable.FullName())
+			return 0, err
 		}
 	}
 
@@ -447,20 +449,6 @@ func (t *TaskExecution) writeDirectly(cfg *Config, df *iop.Dataflow, tgtConn dat
 		return 0, err
 	}
 
-	// Validate data
-	tCnt, err := tgtConn.GetCount(targetTable.FullName())
-	if err != nil {
-		err = g.Error(err, "could not get count from final table %s", targetTable.FullName())
-		return 0, err
-	}
-	if cnt != tCnt {
-		err = g.Error(err, "inserted into final table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
-		return 0, err
-	} else if tCnt == 0 && len(sampleData.Rows) > 0 {
-		err = g.Error(err, "Loaded 0 records while sample data has %d records. Exiting.", len(sampleData.Rows))
-		return 0, err
-	}
-
 	// Handle empty data case
 	if cnt == 0 && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY_TABLES")) && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY")) {
 		g.Warn("No data or records found in stream. Nothing to do. To allow Sling to create empty tables, set SLING_ALLOW_EMPTY=TRUE")
@@ -479,6 +467,20 @@ func (t *TaskExecution) writeDirectly(cfg *Config, df *iop.Dataflow, tgtConn dat
 			if err != nil {
 				return
 			}
+		}
+	}
+
+	// Validate data
+	tCnt, err := tgtConn.GetCount(targetTable.FullName())
+	if err != nil {
+		err = g.Error(err, "could not get count from final table %s", targetTable.FullName())
+		return 0, err
+	} else {
+		if cnt != tCnt {
+			g.Warn("inserted into final table but target table %s count (%d) != new inserted count (%d). Records missing/mismatch.", targetTable.FullName(), tCnt, cnt)
+		} else if tCnt == 0 && len(sampleData.Rows) > 0 {
+			err = g.Error("Loaded 0 records while sample data has %d records. Exiting.", len(sampleData.Rows))
+			return 0, err
 		}
 	}
 
