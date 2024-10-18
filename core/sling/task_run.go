@@ -360,6 +360,27 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		t.AddCleanupTaskLast(func() { tgtConn.Close() })
 	}
 
+	if t.Config.Target.Type == dbio.TypeDbProton && t.Config.Mode == IncrementalMode {
+		existed, err := database.TableExists(tgtConn, t.Config.Target.Object)
+		if err != nil {
+			return g.Error(err, "could not check if final table exists in incremental mode")
+		}
+		if !existed {
+			return g.Error(err, "final table %s not found in incremental mode, please create table %s first", t.Config.Target.Object, t.Config.Target.Object)
+		}
+
+		targetTable, err := database.ParseTableName(t.Config.Target.Object, tgtConn.GetType())
+		if err != nil {
+			return g.Error(err, "could not parse target table")
+		}
+
+		if targetTable.Columns, err = tgtConn.GetSQLColumns(targetTable); err != nil {
+			return g.Error(err, "could not get table columns, when write to timeplusd database in incremental mode, final table %s need created first", targetTable.FullName())
+		}
+
+		t.Config.Target.Columns = targetTable.Columns
+	}
+
 	// check if table exists by getting target columns
 	// only pull if ignore_existing is specified (don't need columns yet otherwise)
 	if t.Config.IgnoreExisting() {
@@ -733,6 +754,7 @@ func (t *TaskExecution) runProtonToProton(srcConn, tgtConn database.Connection) 
 	t.Config.SrcConn = intermediateConfig.TgtConn
 
 	t.SetProgress("Importing data to target Proton database")
+
 	err = retry(maxRetries, retryDelay, func() error {
 		return t.runFileToDB()
 	})
