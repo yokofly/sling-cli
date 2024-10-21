@@ -369,7 +369,7 @@ proton	string	text	col_string string	TRUE	TRUE
 proton	tuple	string	col_tuple tuple	TRUE	TRUE	
 proton	uint16	integer	col_uint16 uint16	TRUE	TRUE	
 proton	uint32	bigint	col_uint32 uint32	TRUE	TRUE	
-proton	uint64	decimal(28,0)	col_uint64 uint64	TRUE	TRUE	
+proton	uint64	bigint	col_uint64 uint64	TRUE	TRUE	
 proton	uint8	integer	col_uint8 uint8	TRUE	TRUE	
 proton	json	json	col_json json	FALSE	FALSE	
 proton	map	json	col_map json	FALSE	FALSE	
