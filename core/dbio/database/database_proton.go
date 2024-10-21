@@ -263,11 +263,17 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 	float64Cols := []int{}
 	floatCols := []int{}
 	stringCols := []int{}
+	booleanCols := []int{}
 
 	for i, col := range batch.Columns {
 		dbType := strings.ToLower(col.DbType)
 		if strings.HasPrefix(dbType, "nullable(") {
 			dbType = strings.TrimPrefix(dbType, "nullable(")
+			dbType = strings.TrimSuffix(dbType, ")")
+		}
+
+		if strings.HasPrefix(dbType, "low_cardinality(") {
+			dbType = strings.TrimPrefix(dbType, "low_cardinality(")
 			dbType = strings.TrimSuffix(dbType, ")")
 		}
 
@@ -294,6 +300,8 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 			float64Cols = append(float64Cols, i)
 		case "string":
 			stringCols = append(stringCols, i)
+		case "bool":
+			booleanCols = append(booleanCols, i)
 		default:
 			// Fall back to col.Type if DbType is not recognized
 			switch {
@@ -321,6 +329,13 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if err == nil {
 					row[colI] = val
 				}
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range booleanCols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToBoolE(row[colI])
 				eG.Capture(err)
 			}
 		}
@@ -630,12 +645,13 @@ func (conn *ProtonConn) GetNativeType(col iop.Column) (nativeType string, err er
 			"float32": "float32",
 			"float64": "float64",
 			"string":  "string",
+			"bool":    "bool",
 		}
+
+		dbType := col.DbType
 
 		// Check if the type is nullable
 		isNullable := strings.HasPrefix(col.DbType, "nullable(")
-		dbType := col.DbType
-
 		if isNullable {
 			// Extract the inner type
 			dbType = strings.TrimPrefix(dbType, "nullable(")
@@ -645,6 +661,20 @@ func (conn *ProtonConn) GetNativeType(col iop.Column) (nativeType string, err er
 		if mappedType, ok := dataTypeMap[dbType]; ok {
 			if isNullable {
 				return "nullable(" + mappedType + ")", nil
+			}
+			return mappedType, nil
+		}
+
+		// Check if the type is low cardinality
+		isLowCardinality := strings.HasPrefix(col.DbType, "low_cardinality(")
+		if isLowCardinality {
+			dbType = strings.TrimPrefix(dbType, "low_cardinality(")
+			dbType = strings.TrimSuffix(dbType, ")")
+		}
+
+		if mappedType, ok := dataTypeMap[dbType]; ok {
+			if isLowCardinality {
+				return "low_cardinality(" + mappedType + ")", nil
 			}
 			return mappedType, nil
 		}
