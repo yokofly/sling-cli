@@ -612,8 +612,9 @@ func (t *TaskExecution) createIntermediateConfig() *Config {
 		Type:   "file",
 		Object: tempFile.Name(),
 		Options: &TargetOptions{
-			Format:    dbio.FileTypeCsv,
-			Delimiter: "~", // Use ~ as delimiter for safety
+			MaxDecimals: g.Int(11),
+			Format:      dbio.FileTypeCsv,
+			Delimiter:   "~", // Use ~ as delimiter for safety
 		},
 		Data: map[string]interface{}{
 			"type": "file",
@@ -749,9 +750,10 @@ func (t *TaskExecution) runProtonToProton(srcConn, tgtConn database.Connection) 
 		Type:   "file",
 		Stream: intermediateConfig.Target.Object,
 		Options: &SourceOptions{
-			Format:    &csvFormat,
-			Delimiter: delimiter,
-			Header:    &header,
+			MaxDecimals: g.Int(11),
+			Format:      &csvFormat,
+			Delimiter:   delimiter,
+			Header:      &header,
 		},
 		Data: intermediateConfig.Target.Data,
 	}
