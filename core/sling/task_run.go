@@ -615,6 +615,9 @@ func (t *TaskExecution) createIntermediateConfig() *Config {
 			MaxDecimals: g.Int(11),
 			Format:      dbio.FileTypeCsv,
 			Delimiter:   "~", // Use ~ as delimiter for safety
+			Header:      g.Bool(true),
+			Concurrency: 7,
+			UseBulk:     g.Bool(true),
 		},
 		Data: map[string]interface{}{
 			"type": "file",
@@ -715,6 +718,9 @@ func (t *TaskExecution) runProtonToProton(srcConn, tgtConn database.Connection) 
 	// t.PBar.Start()
 	originalConfig := t.Config
 	t.Config = intermediateConfig
+
+	g.Debug("proton to proton first stage: writedbtofile using source options: %s", g.Marshal(t.Config.Source.Options))
+	g.Debug("proton to proton first stage: writedbtofile using target options: %s", g.Marshal(t.Config.Target.Options))
 	err = retryWithCleanup(func() error {
 		return t.runDbToFile()
 	})
@@ -761,6 +767,8 @@ func (t *TaskExecution) runProtonToProton(srcConn, tgtConn database.Connection) 
 
 	t.SetProgress("Importing data to target Proton database")
 
+	g.Debug("proton to proton second stage: filetodb using source options: %s", g.Marshal(t.Config.Source.Options))
+	g.Debug("proton to proton second stage: filetodb using target options: %s", g.Marshal(t.Config.Target.Options))
 	err = retry(maxRetries, retryDelay, func() error {
 		return t.runFileToDB()
 	})
