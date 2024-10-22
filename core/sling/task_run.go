@@ -2,6 +2,7 @@ package sling
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -601,7 +602,11 @@ func (t *TaskExecution) createIntermediateConfig() *Config {
 	intermediateConfig := *t.Config // Create a copy of the original config
 
 	// Set up the intermediate file
-	tempFile, err := os.CreateTemp("", "proton_transfer_*.csv")
+	timestamp := time.Now().Format("20060102_150405")
+	sourceTable := t.Config.Source.Stream
+	targetTable := t.Config.Target.Object
+	tempFileName := fmt.Sprintf("proton_%s_%s_to_%s.csv", timestamp, sourceTable, targetTable)
+	tempFile, err := os.CreateTemp("", tempFileName)
 	if err != nil {
 		g.Error(err, "Could not create temporary file")
 		return nil
@@ -672,8 +677,12 @@ func (t *TaskExecution) runProtonToProton(srcConn, tgtConn database.Connection) 
 	}
 
 	cleanup := func() {
-		if intermediateConfig != nil && intermediateConfig.Target.Object != "" {
-			os.Remove(intermediateConfig.Target.Object)
+		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+			if intermediateConfig != nil && intermediateConfig.Target.Object != "" {
+				os.Remove(intermediateConfig.Target.Object)
+			}
+		} else {
+			g.Debug("keeping intermediate file %s", intermediateConfig.Target.Object)
 		}
 	}
 	defer cleanup()
