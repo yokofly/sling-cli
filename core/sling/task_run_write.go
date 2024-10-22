@@ -196,7 +196,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	cfg.Target.Options.TableDDL = g.String(tableTmp.DDL)
 	cfg.Target.TmpTableCreated = true
-	df.Columns = sampleData.Columns
+	if !(cfg.Target.Type == dbio.TypeDbProton && cfg.Mode == IncrementalMode) {
+		df.Columns = sampleData.Columns
+	}
 	setStage("4 - load-into-temp")
 
 	if cfg.Target.Type == dbio.TypeDbProton {
@@ -414,6 +416,33 @@ func (t *TaskExecution) writeDirectly(cfg *Config, df *iop.Dataflow, tgtConn dat
 	if paused := df.Pause(); !paused {
 		err = g.Error(err, "could not pause streams to infer columns")
 		return 0, err
+	}
+
+	if cfg.Target.Type == dbio.TypeDbProton && cfg.Mode == IncrementalMode {
+		existed, err := database.TableExists(tgtConn, targetTable.FullName())
+		if err != nil {
+			return 0, g.Error(err, "could not check if final table exists in incremental mode")
+		} else {
+			if !existed {
+				return 0, g.Error("final table %s not found in incremental mode, please create table %s first", targetTable.FullName(), targetTable.FullName())
+			}
+		}
+
+		targetTable.Columns, err = tgtConn.GetSQLColumns(targetTable)
+		if err != nil {
+			err = g.Error(err, "could not get table columns during WriteToDb")
+			return 0, err
+		}
+		for i := range df.Columns {
+			df.Columns[i].Type = targetTable.Columns[i].Type
+			df.Columns[i].DbType = targetTable.Columns[i].DbType
+			for _, ds := range df.StreamMap {
+				if len(ds.Columns) == len(df.Columns) {
+					ds.Columns[i].Type = targetTable.Columns[i].Type
+					ds.Columns[i].DbType = targetTable.Columns[i].DbType
+				}
+			}
+		}
 	}
 
 	// apply column casing

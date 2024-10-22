@@ -151,7 +151,7 @@ func retry(attempts int, sleep time.Duration, f func() error) (err error) {
 		}
 
 		if i < attempts-1 { // don't sleep after the last attempt
-			g.Info("Sleeping for %v before next attempt, error: %v", sleep, err)
+			g.Error(err, "Sleeping for %v before next attempt", sleep)
 			time.Sleep(sleep)
 		}
 	}
@@ -262,11 +262,18 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 	float32Cols := []int{}
 	float64Cols := []int{}
 	floatCols := []int{}
+	stringCols := []int{}
+	booleanCols := []int{}
 
 	for i, col := range batch.Columns {
 		dbType := strings.ToLower(col.DbType)
 		if strings.HasPrefix(dbType, "nullable(") {
 			dbType = strings.TrimPrefix(dbType, "nullable(")
+			dbType = strings.TrimSuffix(dbType, ")")
+		}
+
+		if strings.HasPrefix(dbType, "low_cardinality(") {
+			dbType = strings.TrimPrefix(dbType, "low_cardinality(")
 			dbType = strings.TrimSuffix(dbType, ")")
 		}
 
@@ -291,6 +298,10 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 			float32Cols = append(float32Cols, i)
 		case "float64":
 			float64Cols = append(float64Cols, i)
+		case "string":
+			stringCols = append(stringCols, i)
+		case "bool":
+			booleanCols = append(booleanCols, i)
 		default:
 			// Fall back to col.Type if DbType is not recognized
 			switch {
@@ -318,6 +329,20 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if err == nil {
 					row[colI] = val
 				}
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range booleanCols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToBoolE(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range stringCols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToStringE(row[colI])
 				eG.Capture(err)
 			}
 		}
@@ -605,6 +630,54 @@ func (conn *ProtonConn) GetNativeType(col iop.Column) (nativeType string, err er
 	// special case for _tp_sn, Column _tp_sn is reserved, expected type is non-nullable int64
 	if col.Name == "_tp_sn" {
 		return "int64 CODEC(Delta(8), ZSTD(1))", nil
+	}
+
+	if col.DbType != "" {
+		dataTypeMap := map[string]string{
+			"int8":    "int8",
+			"int16":   "int16",
+			"int32":   "int32",
+			"int64":   "int64",
+			"uint8":   "uint8",
+			"uint16":  "uint16",
+			"uint32":  "uint32",
+			"uint64":  "uint64",
+			"float32": "float32",
+			"float64": "float64",
+			"string":  "string",
+			"bool":    "bool",
+		}
+
+		dbType := col.DbType
+
+		// Check if the type is nullable
+		isNullable := strings.HasPrefix(col.DbType, "nullable(")
+		if isNullable {
+			// Extract the inner type
+			dbType = strings.TrimPrefix(dbType, "nullable(")
+			dbType = strings.TrimSuffix(dbType, ")")
+		}
+
+		if mappedType, ok := dataTypeMap[dbType]; ok {
+			if isNullable {
+				return "nullable(" + mappedType + ")", nil
+			}
+			return mappedType, nil
+		}
+
+		// Check if the type is low cardinality
+		isLowCardinality := strings.HasPrefix(col.DbType, "low_cardinality(")
+		if isLowCardinality {
+			dbType = strings.TrimPrefix(dbType, "low_cardinality(")
+			dbType = strings.TrimSuffix(dbType, ")")
+		}
+
+		if mappedType, ok := dataTypeMap[dbType]; ok {
+			if isLowCardinality {
+				return "low_cardinality(" + mappedType + ")", nil
+			}
+			return mappedType, nil
+		}
 	}
 
 	return nativeType, err
