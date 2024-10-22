@@ -359,15 +359,43 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 }
 
 func (t *TaskExecution) writeDirectly(cfg *Config, df *iop.Dataflow, tgtConn database.Connection) (cnt uint64, err error) {
-	// Initialize target table
-	targetTable, err := initializeTargetTable(cfg, tgtConn)
+	defer t.PBar.Finish()
+
+	// detect empty
+	if len(df.Columns) == 0 {
+		err = g.Error("no stream columns detected")
+		return
+	}
+
+	targetTable, err := database.ParseTableName(cfg.Target.Object, tgtConn.GetType())
 	if err != nil {
+		return 0, g.Error(err, "could not parse object table name")
+	}
+
+	if cfg.Target.Options.TableDDL != nil {
+		targetTable.DDL = *cfg.Target.Options.TableDDL
+	}
+	targetTable.DDL = g.R(targetTable.DDL, "object_name", targetTable.Raw, "table", targetTable.Raw)
+	targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
+
+	// check table ddl
+	if targetTable.DDL != "" && !strings.Contains(targetTable.DDL, targetTable.Raw) {
+		err = g.Error("The Table DDL provided needs to contains the exact object table name: %s\nProvided:\n%s", targetTable.Raw, targetTable.DDL)
+		return
+	}
+
+	// Execute pre-SQL
+	if err := executeSQL(t, tgtConn, cfg.Target.Options.PreSQL, "pre"); err != nil {
 		return 0, err
 	}
 
-	// Ensure schema exists
-	if err := ensureSchemaExists(tgtConn, targetTable.Schema); err != nil {
-		return 0, err
+	setStage("4 - prepare-temp")
+
+	// create schema if not exist
+	_, err = createSchemaIfNotExists(tgtConn, targetTable.Schema)
+	if err != nil {
+		err = g.Error(err, "Error checking & creating schema "+targetTable.Schema)
+		return
 	}
 
 	if cfg.Target.Type == dbio.TypeDbProton && cfg.Mode == IncrementalMode {
@@ -388,55 +416,106 @@ func (t *TaskExecution) writeDirectly(cfg *Config, df *iop.Dataflow, tgtConn dat
 		return 0, err
 	}
 
-	// Prepare dataflow
-	sampleData, err := prepareDataflow(t, df, tgtConn)
-	if err != nil {
-		return 0, err
+	// apply column casing
+	applyColumnCasingToDf(df, tgtConn.GetType(), t.Config.Target.Options.ColumnCasing)
+
+	sampleData := iop.NewDataset(df.Columns)
+	sampleData.Rows = df.Buffer
+	sampleData.Inferred = df.Inferred
+	if !sampleData.Inferred {
+		sampleData.SafeInference = true
+		sampleData.InferColumnTypes()
+		df.Columns = sampleData.Columns
 	}
 
-	// Set table keys
-	if err := targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys); err != nil {
-		err = g.Error(err, "could not set keys for "+targetTable.FullName())
-		return 0, err
-	}
+	cfg.Target.Options.TableDDL = g.String(targetTable.DDL)
+	defer func() {
+		// reset table ddl (when retrying)
+		cfg.Target.Options.TableDDL = nil
+	}()
 
-	// Execute pre-SQL
-	if err := executeSQL(t, tgtConn, cfg.Target.Options.PreSQL, "pre"); err != nil {
-		return cnt, err
-	}
-
-	// Create final table
-	if err := createTable(t, tgtConn, targetTable, sampleData, false); err != nil {
-		return 0, err
-	}
-
-	if cfg.Target.Type == dbio.TypeDbProton {
-		// proton needs time to create the table
-		time.Sleep(2 * time.Second)
-	}
-
-	cfg.Target.Columns = sampleData.Columns
 	df.Columns = sampleData.Columns
-	setStage("Direct Insert - prepare-final")
+	setStage("4 - load-into-temp")
 
-	// Begin transaction for final table operations
-	txOptions := determineTxOptions(tgtConn.GetType())
-	if err := tgtConn.BeginContext(df.Context.Ctx, &txOptions); err != nil {
-		err = g.Error(err, "could not open transaction to write to final table")
-		return 0, err
+	t.AddCleanupTaskFirst(func() {
+		if cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+			return
+		}
+
+		conn := tgtConn
+		if tgtConn.Context().Err() != nil {
+			conn, err = t.getTgtDBConn(context.Background())
+			if err == nil {
+				conn.Connect()
+			}
+		}
+		conn.Close()
+	})
+
+	err = tgtConn.BeginContext(df.Context.Ctx)
+	if err != nil {
+		err = g.Error(err, "could not open transaction to write to temp table")
+		return
 	}
 
-	defer tgtConn.Rollback()
+	adjustColumnType := cfg.Target.Options.AdjustColumnType != nil && *cfg.Target.Options.AdjustColumnType
 
-	// Configure column handlers (if applicable)
-	if err := configureColumnHandlers(t, cfg, df, tgtConn, targetTable); err != nil {
-		return 0, err
+	// set OnColumnChanged
+	if adjustColumnType {
+		df.OnColumnChanged = func(col iop.Column) error {
+			targetTable.Columns, err = tgtConn.GetSQLColumns(targetTable)
+			if err != nil {
+				return g.Error(err, "could not get table columns for schema change")
+			}
+
+			// preserve keys
+			err = targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
+			if err != nil {
+				return g.Error(err, "could not set keys for "+targetTable.FullName())
+			}
+
+			ok, err := tgtConn.OptimizeTable(&targetTable, iop.Columns{col}, true)
+			if err != nil {
+				return g.Error(err, "could not change table schema")
+			} else if ok {
+				cfg.Target.columns = targetTable.Columns
+			} else {
+				// revert to old type
+				col.Type = df.Columns[col.Position-1].Type
+			}
+			df.Columns.Merge(iop.Columns{col}, true)
+
+			return nil
+		}
 	}
 
-	df.Unpause() // Resume dataflow
-	t.SetProgress("streaming data directly into final table")
+	// set OnColumnAdded
+	if *cfg.Target.Options.AddNewColumns {
+		df.OnColumnAdded = func(col iop.Column) error {
 
-	// Set batch limit if specified
+			// sleep to allow transaction to close
+			time.Sleep(300 * time.Millisecond)
+
+			// df.Context.Lock()
+			// defer df.Context.Unlock()
+
+			ok, err := tgtConn.AddMissingColumns(targetTable, iop.Columns{col})
+			if err != nil {
+				return g.Error(err, "could not add missing columns")
+			} else if ok {
+				_, err = pullTargetTempTableColumns(t.Config, tgtConn, true)
+				if err != nil {
+					return g.Error(err, "could not get table columns")
+				}
+			}
+			return nil
+		}
+	}
+
+	df.Unpause() // to create DDL and set column change functions
+	t.SetProgress("streaming data")
+
+	// set batch size if specified
 	if batchLimit := cfg.Target.Options.BatchLimit; batchLimit != nil {
 		df.SetBatchLimit(*batchLimit)
 	}
@@ -445,9 +524,16 @@ func (t *TaskExecution) writeDirectly(cfg *Config, df *iop.Dataflow, tgtConn dat
 	cnt, err = tgtConn.BulkImportFlow(targetTable.FullName(), df)
 	if err != nil {
 		tgtConn.Rollback()
-		err = g.Error(err, "could not insert into "+targetTable.FullName())
-		return 0, err
+		if cast.ToBool(os.Getenv("SLING_CLI")) && cfg.sourceIsFile() {
+			err = g.Error(err, "could not insert into %s.", targetTable.FullName())
+		} else {
+			err = g.Error(err, "could not insert into "+targetTable.FullName())
+		}
+		return
 	}
+
+	tgtConn.Commit()
+	t.PBar.Finish()
 
 	// Handle empty data case
 	if cnt == 0 && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY_TABLES")) && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY")) {
