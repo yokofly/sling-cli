@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/fatih/color"
 	"github.com/shopspring/decimal"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -183,19 +184,13 @@ func (conn *ProtonConn) GenerateDDL(table Table, data iop.Dataset, temporary boo
 }
 
 // Define a helper function for retrying operations
-func retry(attempts int, sleep time.Duration, f func() error) (err error) {
-	for i := 0; i < attempts; i++ {
-		err = f()
-		if err == nil {
-			return nil
-		}
+func retryWithBackoff(operation func() error) error {
+	b := backoff.NewExponentialBackOff()
+	b.MaxElapsedTime = 5 * time.Minute // Set a maximum total retry time
 
-		if i < attempts-1 { // don't sleep after the last attempt
-			g.Error(err, "Sleeping for %v before next attempt", sleep)
-			time.Sleep(sleep)
-		}
-	}
-	return fmt.Errorf("after %d attempts, last error: %s", attempts, err)
+	return backoff.RetryNotify(operation, b, func(err error, duration time.Duration) {
+		g.Warn("Operation failed, retrying in %v: %v", duration, err)
+	})
 }
 
 // BulkImportStream inserts a stream into a table
@@ -242,7 +237,7 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		}
 
 		batchCount++
-		err = retry(maxRetries, retryDelay, func() error {
+		err = retryWithBackoff(func() error {
 			return conn.processBatch(tableFName, table, batch, columns, batchCount, &count, ds)
 		})
 
@@ -728,25 +723,17 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 
 // ExecContext runs a sql query with context, returns `error`
 func (conn *ProtonConn) ExecContext(ctx context.Context, q string, args ...interface{}) (result sql.Result, err error) {
-	retries := 0
+	err = retryWithBackoff(func() error {
+		var execErr error
+		result, execErr = conn.BaseConn.ExecContext(ctx, q, args...)
+		return execErr
+	})
 
-	for {
-		result, err = conn.BaseConn.ExecContext(ctx, q, args...)
-		if err == nil {
-			return
-		}
-
-		g.Warn("Error executing query (attempt %d): %v", retries+1, err)
-
-		retries++
-		if retries >= maxRetries {
-			g.Error("Max retries reached. Last error: %v", err)
-			return
-		}
-
-		g.Info("Sleeping for %v(sec) before retry", retryDelay.Seconds())
-		time.Sleep(retryDelay)
+	if err != nil {
+		g.Error(err, "Failed to execute query after retries")
 	}
+
+	return result, err
 }
 
 // GenerateInsertStatement returns the proper INSERT statement

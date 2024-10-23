@@ -14,6 +14,7 @@ import (
 
 	_ "net/http/pprof"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/slingdata-io/sling-cli/core"
 
 	"github.com/flarco/g"
@@ -778,7 +779,7 @@ func (t *TaskExecution) runProtonToProton(srcConn, tgtConn database.Connection) 
 
 	g.Debug("proton to proton second stage: filetodb using source options: %s", g.Marshal(t.Config.Source.Options))
 	g.Debug("proton to proton second stage: filetodb using target options: %s", g.Marshal(t.Config.Target.Options))
-	err = retry(maxRetries, retryDelay, func() error {
+	err = retryWithBackoff(func() error {
 		return t.runFileToDB()
 	})
 
@@ -797,15 +798,11 @@ func (t *TaskExecution) runProtonToProton(srcConn, tgtConn database.Connection) 
 	return nil
 }
 
-func retry(attempts int, sleep time.Duration, f func() error) (err error) {
-	for i := 0; i < attempts; i++ {
-		if err = f(); err == nil {
-			return nil
-		}
-		if i < attempts-1 {
-			time.Sleep(sleep)
-			g.Debug("Retrying after error: %v", err)
-		}
-	}
-	return err
+func retryWithBackoff(operation func() error) error {
+	b := backoff.NewExponentialBackOff()
+	b.MaxElapsedTime = 5 * time.Minute // Set a maximum total retry time
+
+	return backoff.RetryNotify(operation, b, func(err error, duration time.Duration) {
+		g.Warn("Operation failed, retrying in %v: %v", duration, err)
+	})
 }
