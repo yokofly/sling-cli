@@ -3,11 +3,13 @@ package database
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/fatih/color"
 	"github.com/shopspring/decimal"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -24,6 +26,45 @@ const (
 	retryDelay        = 5 * time.Second
 	countWaitDuration = 5 * time.Second
 )
+
+var protonDataTypeMap = map[string]string{
+	"int8":    "int8",
+	"int16":   "int16",
+	"int32":   "int32",
+	"int64":   "int64",
+	"uint8":   "uint8",
+	"uint16":  "uint16",
+	"uint32":  "uint32",
+	"uint64":  "uint64",
+	"float32": "float32",
+	"float64": "float64",
+	"string":  "string",
+	"bool":    "bool",
+
+	// Map types
+	"map(string, string)":        "map(string, string)",
+	"map(string, int32)":         "map(string, int32)",
+	"map(string, int64)":         "map(string, int64)",
+	"map(string, float64)":       "map(string, float64)",
+	"map(string, array(string))": "map(string, array(string))",
+	"map(int32, string)":         "map(int32, string)",
+	"map(int64, string)":         "map(int64, string)",
+
+	// Array types
+	"array(int8)":    "array(int8)",
+	"array(int16)":   "array(int16)",
+	"array(int32)":   "array(int32)",
+	"array(int64)":   "array(int64)",
+	"array(uint8)":   "array(uint8)",
+	"array(uint16)":  "array(uint16)",
+	"array(uint32)":  "array(uint32)",
+	"array(uint64)":  "array(uint64)",
+	"array(float32)": "array(float32)",
+	"array(float64)": "array(float64)",
+	"array(string)":  "array(string)",
+	"array(bool)":    "array(bool)",
+	"array(boolean)": "array(boolean)",
+}
 
 // ProtonConn is a Proton connection
 type ProtonConn struct {
@@ -143,21 +184,13 @@ func (conn *ProtonConn) GenerateDDL(table Table, data iop.Dataset, temporary boo
 }
 
 // Define a helper function for retrying operations
-func retry(attempts int, sleep time.Duration, f func() error) (err error) {
-	for i := 0; i < attempts; i++ {
-		err = f()
-		if err == nil {
-			return nil
-		}
+func retryWithBackoff(operation func() error) error {
+	b := backoff.NewExponentialBackOff()
+	b.MaxElapsedTime = 5 * time.Minute // Set a maximum total retry time
 
-		g.Error("Attempt %d failed: %v", i+1, err)
-
-		if i < attempts-1 { // don't sleep after the last attempt
-			g.Info("Sleeping for %v before next attempt", sleep)
-			time.Sleep(sleep)
-		}
-	}
-	return fmt.Errorf("after %d attempts, last error: %s", attempts, err)
+	return backoff.RetryNotify(operation, b, func(err error, duration time.Duration) {
+		g.Warn("Operation failed, retrying in %v: %v", duration, err)
+	})
 }
 
 // BulkImportStream inserts a stream into a table
@@ -204,7 +237,7 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		}
 
 		batchCount++
-		err = retry(maxRetries, retryDelay, func() error {
+		err = retryWithBackoff(func() error {
 			return conn.processBatch(tableFName, table, batch, columns, batchCount, &count, ds)
 		})
 
@@ -253,18 +286,135 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 
 	decimalCols := []int{}
 	intCols := []int{}
+	int8Cols := []int{}
+	int16Cols := []int{}
+	int32Cols := []int{}
 	int64Cols := []int{}
+	uint8Cols := []int{}
+	uint16Cols := []int{}
+	uint32Cols := []int{}
+	uint64Cols := []int{}
+	float32Cols := []int{}
+	float64Cols := []int{}
 	floatCols := []int{}
+	stringCols := []int{}
+	booleanCols := []int{}
+
+	// Array types
+	arrayStringCols := []int{}
+	arrayBooleanCols := []int{}
+	arrayInt8Cols := []int{}
+	arrayInt16Cols := []int{}
+	arrayInt32Cols := []int{}
+	arrayInt64Cols := []int{}
+	arrayUint8Cols := []int{}
+	arrayUint16Cols := []int{}
+	arrayUint32Cols := []int{}
+	arrayUint64Cols := []int{}
+	arrayFloat32Cols := []int{}
+	arrayFloat64Cols := []int{}
+
+	// Map types
+	mapStringStringCols := []int{}
+	mapStringInt32Cols := []int{}
+	mapStringInt64Cols := []int{}
+	mapStringUint32Cols := []int{}
+	mapStringUint64Cols := []int{}
+	mapStringFloat64Cols := []int{}
+	mapStringFloat32Cols := []int{}
+	mapStringArrayStringCols := []int{}
+	mapInt32StringCols := []int{}
+	mapInt64StringCols := []int{}
+
 	for i, col := range batch.Columns {
-		switch {
-		case col.Type == iop.DecimalType:
-			decimalCols = append(decimalCols, i)
-		case col.Type == iop.SmallIntType:
-			intCols = append(intCols, i)
-		case col.Type.IsInteger():
+		dbType := strings.ToLower(col.DbType)
+		dbType = strings.TrimPrefix(dbType, "low_cardinality(")
+		dbType = strings.TrimPrefix(dbType, "nullable(")
+
+		dbType = strings.TrimSuffix(dbType, ")")
+
+		switch dbType {
+		case "int8":
+			int8Cols = append(int8Cols, i)
+		case "int16":
+			int16Cols = append(int16Cols, i)
+		case "int32":
+			int32Cols = append(int32Cols, i)
+		case "int64":
 			int64Cols = append(int64Cols, i)
-		case col.Type == iop.FloatType:
-			floatCols = append(floatCols, i)
+		case "uint8":
+			uint8Cols = append(uint8Cols, i)
+		case "uint16":
+			uint16Cols = append(uint16Cols, i)
+		case "uint32":
+			uint32Cols = append(uint32Cols, i)
+		case "uint64":
+			uint64Cols = append(uint64Cols, i)
+		case "float32":
+			float32Cols = append(float32Cols, i)
+		case "float64":
+			float64Cols = append(float64Cols, i)
+		case "string":
+			stringCols = append(stringCols, i)
+		case "bool":
+			booleanCols = append(booleanCols, i)
+		case "array(string)":
+			arrayStringCols = append(arrayStringCols, i)
+		case "array(bool)", "array(boolean)":
+			arrayBooleanCols = append(arrayBooleanCols, i)
+		case "array(int64)":
+			arrayInt64Cols = append(arrayInt64Cols, i)
+		case "array(int32)":
+			arrayInt32Cols = append(arrayInt32Cols, i)
+		case "array(int16)":
+			arrayInt16Cols = append(arrayInt16Cols, i)
+		case "array(int8)":
+			arrayInt8Cols = append(arrayInt8Cols, i)
+		case "array(uint64)":
+			arrayUint64Cols = append(arrayUint64Cols, i)
+		case "array(uint32)":
+			arrayUint32Cols = append(arrayUint32Cols, i)
+		case "array(uint16)":
+			arrayUint16Cols = append(arrayUint16Cols, i)
+		case "array(uint8)":
+			arrayUint8Cols = append(arrayUint8Cols, i)
+		case "array(float32)":
+			arrayFloat32Cols = append(arrayFloat32Cols, i)
+		case "array(float64)":
+			arrayFloat64Cols = append(arrayFloat64Cols, i)
+		case "map(string, string)":
+			mapStringStringCols = append(mapStringStringCols, i)
+		case "map(string, int32)":
+			mapStringInt32Cols = append(mapStringInt32Cols, i)
+		case "map(string, int64)":
+			mapStringInt64Cols = append(mapStringInt64Cols, i)
+		case "map(string, uint32)":
+			mapStringUint32Cols = append(mapStringUint32Cols, i)
+		case "map(string, uint64)":
+			mapStringUint64Cols = append(mapStringUint64Cols, i)
+		case "map(string, float64)":
+			mapStringFloat64Cols = append(mapStringFloat64Cols, i)
+		case "map(string, float32)":
+			mapStringFloat32Cols = append(mapStringFloat32Cols, i)
+		case "map(string, array(string))":
+			mapStringArrayStringCols = append(mapStringArrayStringCols, i)
+		case "map(int32, string)":
+			mapInt32StringCols = append(mapInt32StringCols, i)
+		case "map(int64, string)":
+			mapInt64StringCols = append(mapInt64StringCols, i)
+
+		default:
+			// Fall back to col.Type if DbType is not recognized
+			switch {
+			case col.Type == iop.DecimalType:
+				decimalCols = append(decimalCols, i)
+			case col.Type == iop.SmallIntType:
+				intCols = append(intCols, i)
+			case col.Type.IsInteger():
+				int64Cols = append(int64Cols, i)
+			case col.Type == iop.FloatType:
+				floatCols = append(floatCols, i)
+			}
 		}
 	}
 
@@ -280,6 +430,41 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if err == nil {
 					row[colI] = val
 				}
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range booleanCols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToBoolE(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range stringCols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToStringE(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range int8Cols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToInt8E(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range int16Cols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToInt16E(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range int32Cols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToInt32E(row[colI])
 				eG.Capture(err)
 			}
 		}
@@ -300,10 +485,208 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 			}
 		}
 
+		for _, colI := range uint8Cols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToUint8E(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range uint16Cols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToUint16E(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		// set Int32 correctly
+		for _, colI := range uint32Cols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToUint32E(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		// set Int64 correctly
+		for _, colI := range uint64Cols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToUint64E(row[colI])
+				eG.Capture(err)
+			}
+		}
+
 		// set Float64 correctly
 		for _, colI := range floatCols {
 			if row[colI] != nil {
 				row[colI], err = cast.ToFloat64E(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range float32Cols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToFloat32E(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range float64Cols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToFloat64E(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range arrayStringCols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToArrayString(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range arrayBooleanCols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToArrayBool(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range arrayInt8Cols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToArrayInt8(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range arrayInt16Cols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToArrayInt16(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range arrayInt32Cols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToArrayInt32(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range arrayInt64Cols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToArrayInt64(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range arrayUint8Cols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToArrayUint8(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range arrayUint16Cols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToArrayUint16(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range arrayUint32Cols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToArrayUint32(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range arrayUint64Cols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToArrayUint64(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range arrayFloat32Cols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToArrayFloat32(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range arrayFloat64Cols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToArrayFloat64(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range mapStringStringCols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToMapStringString(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range mapStringInt32Cols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToMapStringInt32(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range mapStringInt64Cols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToMapStringInt64(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range mapStringUint32Cols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToMapStringUint32(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range mapStringUint64Cols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToMapStringUint64(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range mapStringFloat64Cols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToMapStringFloat64(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range mapStringFloat32Cols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToMapStringFloat32(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range mapStringArrayStringCols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToMapStringArrayString(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range mapInt32StringCols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToMapInt32String(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		for _, colI := range mapInt64StringCols {
+			if row[colI] != nil {
+				row[colI], err = conn.convertToMapInt64String(row[colI])
 				eG.Capture(err)
 			}
 		}
@@ -340,25 +723,17 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 
 // ExecContext runs a sql query with context, returns `error`
 func (conn *ProtonConn) ExecContext(ctx context.Context, q string, args ...interface{}) (result sql.Result, err error) {
-	retries := 0
+	err = retryWithBackoff(func() error {
+		var execErr error
+		result, execErr = conn.BaseConn.ExecContext(ctx, q, args...)
+		return execErr
+	})
 
-	for {
-		result, err = conn.BaseConn.ExecContext(ctx, q, args...)
-		if err == nil {
-			return
-		}
-
-		g.Warn("Error executing query (attempt %d): %v", retries+1, err)
-
-		retries++
-		if retries >= maxRetries {
-			g.Error("Max retries reached. Last error: %v", err)
-			return
-		}
-
-		g.Info("Sleeping for %v(sec) before retry", retryDelay.Seconds())
-		time.Sleep(retryDelay)
+	if err != nil {
+		g.Error(err, "Failed to execute query after retries")
 	}
+
+	return result, err
 }
 
 // GenerateInsertStatement returns the proper INSERT statement
@@ -504,5 +879,452 @@ func (conn *ProtonConn) GetNativeType(col iop.Column) (nativeType string, err er
 		return "int64 CODEC(Delta(8), ZSTD(1))", nil
 	}
 
+	if col.DbType != "" {
+		dbType := col.DbType
+
+		// Check if the type is nullable
+		isNullable := strings.HasPrefix(col.DbType, "nullable(")
+		if isNullable {
+			// Extract the inner type
+			dbType = strings.TrimPrefix(dbType, "nullable(")
+			dbType = strings.TrimSuffix(dbType, ")")
+		}
+
+		if mappedType, ok := protonDataTypeMap[dbType]; ok {
+			if isNullable {
+				return "nullable(" + mappedType + ")", nil
+			}
+			return mappedType, nil
+		}
+
+		// Check if the type is low cardinality
+		isLowCardinality := strings.HasPrefix(col.DbType, "low_cardinality(")
+		if isLowCardinality {
+			dbType = strings.TrimPrefix(dbType, "low_cardinality(")
+			dbType = strings.TrimSuffix(dbType, ")")
+		}
+
+		if mappedType, ok := protonDataTypeMap[dbType]; ok {
+			if isLowCardinality {
+				return "low_cardinality(" + mappedType + ")", nil
+			}
+			return mappedType, nil
+		}
+	}
+
 	return nativeType, err
+}
+
+// Array types
+func (conn *ProtonConn) convertToArrayString(value interface{}) ([]string, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result []string
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal array: %v", err)
+	}
+
+	return result, nil
+}
+
+func (conn *ProtonConn) convertToArrayInt8(value interface{}) ([]int8, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result []int8
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal array: %v", err)
+	}
+
+	return result, nil
+}
+
+func (conn *ProtonConn) convertToArrayInt16(value interface{}) ([]int16, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result []int16
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal array: %v", err)
+	}
+
+	return result, nil
+}
+func (conn *ProtonConn) convertToArrayInt32(value interface{}) ([]int32, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result []int32
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal array: %v", err)
+	}
+
+	return result, nil
+}
+func (conn *ProtonConn) convertToArrayInt64(value interface{}) ([]int64, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result []int64
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal array: %v", err)
+	}
+
+	return result, nil
+}
+func (conn *ProtonConn) convertToArrayUint8(value interface{}) ([]uint8, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result []uint8
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal array: %v", err)
+	}
+
+	return result, nil
+}
+func (conn *ProtonConn) convertToArrayUint16(value interface{}) ([]uint16, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result []uint16
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal array: %v", err)
+	}
+
+	return result, nil
+}
+func (conn *ProtonConn) convertToArrayUint32(value interface{}) ([]uint32, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result []uint32
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal array: %v", err)
+	}
+
+	return result, nil
+}
+
+func (conn *ProtonConn) convertToArrayUint64(value interface{}) ([]uint64, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result []uint64
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal array: %v", err)
+	}
+
+	return result, nil
+}
+
+func (conn *ProtonConn) convertToArrayFloat32(value interface{}) ([]float32, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result []float32
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal array: %v", err)
+	}
+
+	return result, nil
+}
+func (conn *ProtonConn) convertToArrayFloat64(value interface{}) ([]float64, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result []float64
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal array: %v", err)
+	}
+
+	return result, nil
+}
+
+func (conn *ProtonConn) convertToArrayBool(value interface{}) ([]bool, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result []bool
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal array: %v", err)
+	}
+
+	return result, nil
+}
+
+// Map types
+func (conn *ProtonConn) convertToMapStringUint64(value interface{}) (map[string]uint64, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result map[string]uint64
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal map: %v", err)
+	}
+
+	return result, nil
+}
+
+func (conn *ProtonConn) convertToMapStringUint32(value interface{}) (map[string]uint32, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result map[string]uint32
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal map: %v", err)
+	}
+
+	return result, nil
+}
+
+func (conn *ProtonConn) convertToMapStringInt32(value interface{}) (map[string]int32, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result map[string]int32
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal map: %v", err)
+	}
+
+	return result, nil
+}
+
+func (conn *ProtonConn) convertToMapStringInt64(value interface{}) (map[string]int64, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result map[string]int64
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal map: %v", err)
+	}
+
+	return result, nil
+}
+
+func (conn *ProtonConn) convertToMapStringFloat64(value interface{}) (map[string]float64, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result map[string]float64
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal map: %v", err)
+	}
+
+	return result, nil
+}
+
+func (conn *ProtonConn) convertToMapStringFloat32(value interface{}) (map[string]float32, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result map[string]float32
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal map: %v", err)
+	}
+
+	return result, nil
+}
+
+func (conn *ProtonConn) convertToMapInt32String(value interface{}) (map[int32]string, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result map[int32]string
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal map: %v", err)
+	}
+
+	return result, nil
+}
+
+func (conn *ProtonConn) convertToMapInt64String(value interface{}) (map[int64]string, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result map[int64]string
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal map: %v", err)
+	}
+
+	return result, nil
+}
+
+func (conn *ProtonConn) convertToMapStringArrayString(value interface{}) (map[string][]string, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result map[string][]string
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal map: %v", err)
+	}
+
+	return result, nil
+}
+
+func (conn *ProtonConn) convertToMapStringString(value interface{}) (map[string]string, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	var result map[string]string
+	err := json.Unmarshal([]byte(str), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal map: %v", err)
+	}
+
+	return result, nil
 }

@@ -2,15 +2,20 @@ package sling
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"syscall"
 	"time"
 
 	_ "net/http/pprof"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/slingdata-io/sling-cli/core"
 
 	"github.com/flarco/g"
@@ -358,6 +363,30 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		t.AddCleanupTaskLast(func() { tgtConn.Close() })
 	}
 
+	if t.Config.Target.Type == dbio.TypeDbProton && t.Config.Mode == IncrementalMode {
+		t.Config.Target.Object = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Object)
+
+		targetTable, err := database.ParseTableName(t.Config.Target.Object, tgtConn.GetType())
+		if err != nil {
+			return g.Error(err, "could not parse target table")
+		}
+
+		existed, err := database.TableExists(tgtConn, targetTable.FullName())
+		if err != nil {
+			return g.Error(err, "could not check if final table exists in incremental mode")
+		}
+		if !existed {
+			err = g.Error("final table %s not found in incremental mode, please create table %s first", t.Config.Target.Object, t.Config.Target.Object)
+			return err
+		}
+
+		if targetTable.Columns, err = tgtConn.GetSQLColumns(targetTable); err != nil {
+			return g.Error(err, "could not get table columns, when write to timeplusd database in incremental mode, final table %s need created first", targetTable.FullName())
+		}
+
+		t.Config.Target.Columns = targetTable.Columns
+	}
+
 	// check if table exists by getting target columns
 	// only pull if ignore_existing is specified (don't need columns yet otherwise)
 	if t.Config.IgnoreExisting() {
@@ -571,13 +600,56 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	return
 }
 
+func CreateTempFile(fileName string) (*os.File, error) {
+	// First try /app directory
+	appFolder := "/app"
+
+	// Check if /app exists and we have write permissions
+	if info, err := os.Stat(appFolder); err == nil && info.IsDir() {
+		// Try to create a test file to verify write permissions
+		testPath := filepath.Join(appFolder, ".write_test")
+		if testFile, err := os.Create(testPath); err == nil {
+			testFile.Close()
+			os.Remove(testPath) // Clean up test file
+
+			// /app exists and is writable, create file there
+			tempFilePath := filepath.Join(appFolder, fileName)
+			if file, err := os.Create(tempFilePath); err == nil {
+				return file, nil
+			} else {
+				return nil, g.Error("failed to create file in /app: %v", err)
+			}
+		}
+	}
+
+	// Fallback to current directory
+	localFolder := "sling_transfer"
+	if err := os.MkdirAll(localFolder, 0755); err != nil {
+		return nil, g.Error("failed to create local directory: %v", err)
+	}
+
+	tempFilePath := filepath.Join(localFolder, fileName)
+	file, err := os.Create(tempFilePath)
+	if err != nil {
+		return nil, g.Error("failed to create file in local directory: %v", err)
+	}
+
+	return file, nil
+}
+
 func (t *TaskExecution) createIntermediateConfig() *Config {
 	intermediateConfig := *t.Config // Create a copy of the original config
 
 	// Set up the intermediate file
-	tempFile, err := os.CreateTemp("", "proton_transfer_*.csv")
+	timestamp := time.Now().Format("20060102_150405")
+	sourceTable := t.Config.Source.Stream
+	targetTable := t.Config.Target.Object
+	tempFileName := fmt.Sprintf("timeplus_database_%s_%s_to_%s.csv", timestamp, sourceTable, targetTable)
+
+	// Create or overwrite the file (this is an intermediate file, no need to check if it exists)
+	tempFile, err := CreateTempFile(tempFileName)
 	if err != nil {
-		g.Error(err, "Could not create temporary file")
+		g.Error(err, "Could not create temporary file '%s' when transferring from %s to %s", tempFileName, t.Config.Source.Stream, t.Config.Target.Object)
 		return nil
 	}
 
@@ -589,6 +661,9 @@ func (t *TaskExecution) createIntermediateConfig() *Config {
 			MaxDecimals: g.Int(11),
 			Format:      dbio.FileTypeCsv,
 			Delimiter:   "~", // Use ~ as delimiter for safety
+			Header:      g.Bool(true),
+			Concurrency: 7,
+			UseBulk:     g.Bool(true),
 		},
 		Data: map[string]interface{}{
 			"type": "file",
@@ -610,9 +685,29 @@ func (t *TaskExecution) createIntermediateConfig() *Config {
 }
 
 func (t *TaskExecution) runProtonToProton(srcConn, tgtConn database.Connection) (err error) {
+	if t.Config.Target.Type == dbio.TypeDbProton && t.Config.Mode == IncrementalMode {
+		existed, err := database.TableExists(tgtConn, t.Config.Target.Object)
+		if err != nil {
+			return g.Error(err, "could not check if final table exists in incremental mode")
+		}
+		if !existed {
+			err = g.Error("final table %s not found in incremental mode, please create table %s first", t.Config.Target.Object, t.Config.Target.Object)
+			return err
+		}
+	}
+
 	start := time.Now()
 	maxRetries := 3
 	retryDelay := time.Second * 5
+
+	// Set up interrupt handling
+	interruptChan := make(chan os.Signal, 1)
+	signal.Notify(interruptChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(interruptChan)
+
+	// Create a context that can be cancelled
+	ctx, cancel := context.WithCancel(t.Context.Ctx)
+	defer cancel()
 
 	// Step 1: Create intermediate config
 	t.SetProgress("Creating intermediate configuration")
@@ -621,14 +716,62 @@ func (t *TaskExecution) runProtonToProton(srcConn, tgtConn database.Connection) 
 		err = g.Error("Failed to create intermediate config")
 		return
 	}
-	defer os.Remove(intermediateConfig.Target.Object) // Clean up the temp file
+
+	cleanup := func() {
+		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+			if intermediateConfig != nil && intermediateConfig.Target.Object != "" {
+				os.Remove(intermediateConfig.Target.Object)
+			}
+		} else {
+			g.Debug("keeping intermediate file %s", intermediateConfig.Target.Object)
+		}
+	}
+	defer cleanup()
+
+	// Function to handle interrupts
+	go func() {
+		select {
+		case <-interruptChan:
+			t.SetProgress("Interrupt received, cleaning up and exiting")
+			cancel()
+			cleanup()
+			os.Exit(1)
+		case <-ctx.Done():
+			return
+		}
+	}()
+
+	// Retry function with cleanup
+	retryWithCleanup := func(operation func() error) error {
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+				err := operation()
+				if err == nil {
+					return nil
+				}
+				if attempt == maxRetries {
+					return err
+				}
+				t.SetProgress("Attempt %d failed, retrying in %v", attempt, retryDelay)
+				cleanup()
+				time.Sleep(retryDelay)
+			}
+		}
+		return g.Error("Max retries reached")
+	}
 
 	// Step 2: Run DbToFile with retries
 	t.SetProgress("Exporting data from source Proton database")
 	// t.PBar.Start()
 	originalConfig := t.Config
 	t.Config = intermediateConfig
-	err = retry(maxRetries, retryDelay, func() error {
+
+	g.Debug("proton to proton first stage: writedbtofile using source options: %s", g.Marshal(t.Config.Source.Options))
+	g.Debug("proton to proton first stage: writedbtofile using target options: %s", g.Marshal(t.Config.Target.Options))
+	err = retryWithCleanup(func() error {
 		return t.runDbToFile()
 	})
 	t.Config = originalConfig // Restore original config
@@ -673,7 +816,10 @@ func (t *TaskExecution) runProtonToProton(srcConn, tgtConn database.Connection) 
 	t.Config.SrcConn = intermediateConfig.TgtConn
 
 	t.SetProgress("Importing data to target Proton database")
-	err = retry(maxRetries, retryDelay, func() error {
+
+	g.Debug("proton to proton second stage: filetodb using source options: %s", g.Marshal(t.Config.Source.Options))
+	g.Debug("proton to proton second stage: filetodb using target options: %s", g.Marshal(t.Config.Target.Options))
+	err = retryWithBackoff(func() error {
 		return t.runFileToDB()
 	})
 
@@ -692,19 +838,11 @@ func (t *TaskExecution) runProtonToProton(srcConn, tgtConn database.Connection) 
 	return nil
 }
 
-func retry(attempts int, sleep time.Duration, f func() error) (err error) {
-	for i := 0; ; i++ {
-		err = f()
-		if err == nil {
-			return
-		}
+func retryWithBackoff(operation func() error) error {
+	b := backoff.NewExponentialBackOff()
+	b.MaxElapsedTime = 5 * time.Minute // Set a maximum total retry time
 
-		if i >= (attempts - 1) {
-			break
-		}
-
-		time.Sleep(sleep)
-		g.Debug("Retrying after error: %v", err)
-	}
-	return err
+	return backoff.RetryNotify(operation, b, func(err error, duration time.Duration) {
+		g.Warn("Operation failed, retrying in %v: %v", duration, err)
+	})
 }
