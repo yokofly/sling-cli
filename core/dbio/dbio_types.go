@@ -161,6 +161,14 @@ func (t Type) DBNameUpperCase() bool {
 	return g.In(t, TypeDbOracle, TypeDbSnowflake)
 }
 
+// timeplus@yokofly
+// DBNameCaseSensitive returns true if case sensitive
+// turn activate with clickhouse to fix the old issue https://github.com/slingdata-io/sling-cli/issues/417
+func (t Type) DBNameCaseSensitive() bool {
+	return t == TypeDbProton
+	// return g.In(t, TypeDbClickhouse, TypeDbProton)
+}
+
 // Kind returns the kind of connection
 func (t Type) Kind() Kind {
 	switch t {

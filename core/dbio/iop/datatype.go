@@ -596,6 +596,15 @@ func (cols Columns) GetColumn(name string) *Column {
 	return colsMap[strings.ToLower(name)]
 }
 
+// GetColumnWithOriginalCase returns the matched Col
+func (cols Columns) GetColumnWithOriginalCase(name string) *Column {
+	colsMap := map[string]*Column{}
+	for _, col := range cols {
+		colsMap[col.Name] = &col
+	}
+	return colsMap[name]
+}
+
 func (cols Columns) Merge(newCols Columns, overwrite bool) (col2 Columns, added schemaChg, changed []schemaChg) {
 	added = schemaChg{Added: true}
 
