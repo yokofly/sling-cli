@@ -1146,16 +1146,23 @@ func (conn *ProtonConn) convertToArrayFloat32(value interface{}) ([]float32, err
 }
 func (conn *ProtonConn) convertToArrayFloat64(value interface{}) ([]float64, error) {
 	if value == nil {
-		return nil, nil
+		g.Info("empty arrayfloat64 if value == nil")
+		return []float64{}, nil
 	}
 
 	if value == "" {
+		g.Info("empty arrayfloat64 if value == \"\"")
 		return []float64{}, nil
 	}
 
 	str, ok := value.(string)
 	if !ok {
 		return nil, fmt.Errorf("expected string, got %T", value)
+	}
+
+	if len(str) == 0 {
+		g.Info("empty arrayfloat64 if len(str) == 0")
+		return []float64{}, nil
 	}
 
 	var result []float64
