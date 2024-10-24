@@ -328,10 +328,14 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 
 	for i, col := range batch.Columns {
 		dbType := strings.ToLower(col.DbType)
-		dbType = strings.TrimPrefix(dbType, "low_cardinality(")
-		dbType = strings.TrimPrefix(dbType, "nullable(")
-
-		dbType = strings.TrimSuffix(dbType, ")")
+		if strings.HasPrefix(dbType, "nullable(") {
+			dbType = strings.TrimPrefix(dbType, "nullable(")
+			dbType = strings.TrimSuffix(dbType, ")")
+		}
+		if strings.HasPrefix(dbType, "low_cardinality(") {
+			dbType = strings.TrimPrefix(dbType, "low_cardinality(")
+			dbType = strings.TrimSuffix(dbType, ")")
+		}
 
 		switch dbType {
 		case "int8":
