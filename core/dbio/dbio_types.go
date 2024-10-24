@@ -474,7 +474,9 @@ func (t Type) Quote(field string, normalize ...bool) string {
 	template, _ := t.Template()
 	// always normalize if case is uniform. Why would you quote and not normalize?
 	if !hasVariedCase(field) && Normalize {
-		if g.In(t, TypeDbOracle, TypeDbSnowflake) {
+		if t.DBNameCaseSensitive() {
+			// timeplus@yokofly
+		} else if g.In(t, TypeDbOracle, TypeDbSnowflake) {
 			field = strings.ToUpper(field)
 		} else {
 			field = strings.ToLower(field)
