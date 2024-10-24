@@ -925,6 +925,10 @@ func (conn *ProtonConn) convertToArrayString(value interface{}) ([]string, error
 		return nil, nil
 	}
 
+	if value == "" {
+		return []string{}, nil
+	}
+
 	str, ok := value.(string)
 	if !ok {
 		return nil, fmt.Errorf("expected string, got %T", value)
@@ -942,6 +946,10 @@ func (conn *ProtonConn) convertToArrayString(value interface{}) ([]string, error
 func (conn *ProtonConn) convertToArrayInt8(value interface{}) ([]int8, error) {
 	if value == nil {
 		return nil, nil
+	}
+
+	if value == "" {
+		return []int8{}, nil
 	}
 
 	str, ok := value.(string)
@@ -963,6 +971,10 @@ func (conn *ProtonConn) convertToArrayInt16(value interface{}) ([]int16, error) 
 		return nil, nil
 	}
 
+	if value == "" {
+		return []int16{}, nil
+	}
+
 	str, ok := value.(string)
 	if !ok {
 		return nil, fmt.Errorf("expected string, got %T", value)
@@ -979,6 +991,10 @@ func (conn *ProtonConn) convertToArrayInt16(value interface{}) ([]int16, error) 
 func (conn *ProtonConn) convertToArrayInt32(value interface{}) ([]int32, error) {
 	if value == nil {
 		return nil, nil
+	}
+
+	if value == "" {
+		return []int32{}, nil
 	}
 
 	str, ok := value.(string)
@@ -999,6 +1015,10 @@ func (conn *ProtonConn) convertToArrayInt64(value interface{}) ([]int64, error) 
 		return nil, nil
 	}
 
+	if value == "" {
+		return []int64{}, nil
+	}
+
 	str, ok := value.(string)
 	if !ok {
 		return nil, fmt.Errorf("expected string, got %T", value)
@@ -1015,6 +1035,10 @@ func (conn *ProtonConn) convertToArrayInt64(value interface{}) ([]int64, error) 
 func (conn *ProtonConn) convertToArrayUint8(value interface{}) ([]uint8, error) {
 	if value == nil {
 		return nil, nil
+	}
+
+	if value == "" {
+		return []uint8{}, nil
 	}
 
 	str, ok := value.(string)
@@ -1035,6 +1059,10 @@ func (conn *ProtonConn) convertToArrayUint16(value interface{}) ([]uint16, error
 		return nil, nil
 	}
 
+	if value == "" {
+		return []uint16{}, nil
+	}
+
 	str, ok := value.(string)
 	if !ok {
 		return nil, fmt.Errorf("expected string, got %T", value)
@@ -1051,6 +1079,10 @@ func (conn *ProtonConn) convertToArrayUint16(value interface{}) ([]uint16, error
 func (conn *ProtonConn) convertToArrayUint32(value interface{}) ([]uint32, error) {
 	if value == nil {
 		return nil, nil
+	}
+
+	if value == "" {
+		return []uint32{}, nil
 	}
 
 	str, ok := value.(string)
@@ -1072,6 +1104,10 @@ func (conn *ProtonConn) convertToArrayUint64(value interface{}) ([]uint64, error
 		return nil, nil
 	}
 
+	if value == "" {
+		return []uint64{}, nil
+	}
+
 	str, ok := value.(string)
 	if !ok {
 		return nil, fmt.Errorf("expected string, got %T", value)
@@ -1089,6 +1125,10 @@ func (conn *ProtonConn) convertToArrayUint64(value interface{}) ([]uint64, error
 func (conn *ProtonConn) convertToArrayFloat32(value interface{}) ([]float32, error) {
 	if value == nil {
 		return nil, nil
+	}
+
+	if value == "" {
+		return []float32{}, nil
 	}
 
 	str, ok := value.(string)
@@ -1109,6 +1149,10 @@ func (conn *ProtonConn) convertToArrayFloat64(value interface{}) ([]float64, err
 		return nil, nil
 	}
 
+	if value == "" {
+		return []float64{}, nil
+	}
+
 	str, ok := value.(string)
 	if !ok {
 		return nil, fmt.Errorf("expected string, got %T", value)
@@ -1126,6 +1170,10 @@ func (conn *ProtonConn) convertToArrayFloat64(value interface{}) ([]float64, err
 func (conn *ProtonConn) convertToArrayBool(value interface{}) ([]bool, error) {
 	if value == nil {
 		return nil, nil
+	}
+
+	if value == "" {
+		return []bool{}, nil
 	}
 
 	str, ok := value.(string)
@@ -1148,6 +1196,10 @@ func (conn *ProtonConn) convertToMapStringUint64(value interface{}) (map[string]
 		return nil, nil
 	}
 
+	if value == "" {
+		return map[string]uint64{}, nil
+	}
+
 	str, ok := value.(string)
 	if !ok {
 		return nil, fmt.Errorf("expected string, got %T", value)
@@ -1165,6 +1217,10 @@ func (conn *ProtonConn) convertToMapStringUint64(value interface{}) (map[string]
 func (conn *ProtonConn) convertToMapStringUint32(value interface{}) (map[string]uint32, error) {
 	if value == nil {
 		return nil, nil
+	}
+
+	if value == "" {
+		return map[string]uint32{}, nil
 	}
 
 	str, ok := value.(string)
@@ -1186,6 +1242,10 @@ func (conn *ProtonConn) convertToMapStringInt32(value interface{}) (map[string]i
 		return nil, nil
 	}
 
+	if value == "" {
+		return map[string]int32{}, nil
+	}
+
 	str, ok := value.(string)
 	if !ok {
 		return nil, fmt.Errorf("expected string, got %T", value)
@@ -1203,6 +1263,10 @@ func (conn *ProtonConn) convertToMapStringInt32(value interface{}) (map[string]i
 func (conn *ProtonConn) convertToMapStringInt64(value interface{}) (map[string]int64, error) {
 	if value == nil {
 		return nil, nil
+	}
+
+	if value == "" {
+		return map[string]int64{}, nil
 	}
 
 	str, ok := value.(string)
@@ -1224,6 +1288,10 @@ func (conn *ProtonConn) convertToMapStringFloat64(value interface{}) (map[string
 		return nil, nil
 	}
 
+	if value == "" {
+		return map[string]float64{}, nil
+	}
+
 	str, ok := value.(string)
 	if !ok {
 		return nil, fmt.Errorf("expected string, got %T", value)
@@ -1241,6 +1309,10 @@ func (conn *ProtonConn) convertToMapStringFloat64(value interface{}) (map[string
 func (conn *ProtonConn) convertToMapStringFloat32(value interface{}) (map[string]float32, error) {
 	if value == nil {
 		return nil, nil
+	}
+
+	if value == "" {
+		return map[string]float32{}, nil
 	}
 
 	str, ok := value.(string)
@@ -1262,6 +1334,10 @@ func (conn *ProtonConn) convertToMapInt32String(value interface{}) (map[int32]st
 		return nil, nil
 	}
 
+	if value == "" {
+		return map[int32]string{}, nil
+	}
+
 	str, ok := value.(string)
 	if !ok {
 		return nil, fmt.Errorf("expected string, got %T", value)
@@ -1279,6 +1355,10 @@ func (conn *ProtonConn) convertToMapInt32String(value interface{}) (map[int32]st
 func (conn *ProtonConn) convertToMapInt64String(value interface{}) (map[int64]string, error) {
 	if value == nil {
 		return nil, nil
+	}
+
+	if value == "" {
+		return map[int64]string{}, nil
 	}
 
 	str, ok := value.(string)
@@ -1300,6 +1380,10 @@ func (conn *ProtonConn) convertToMapStringArrayString(value interface{}) (map[st
 		return nil, nil
 	}
 
+	if value == "" {
+		return map[string][]string{}, nil
+	}
+
 	str, ok := value.(string)
 	if !ok {
 		return nil, fmt.Errorf("expected string, got %T", value)
@@ -1317,6 +1401,10 @@ func (conn *ProtonConn) convertToMapStringArrayString(value interface{}) (map[st
 func (conn *ProtonConn) convertToMapStringString(value interface{}) (map[string]string, error) {
 	if value == nil {
 		return nil, nil
+	}
+
+	if value == "" {
+		return map[string]string{}, nil
 	}
 
 	str, ok := value.(string)
