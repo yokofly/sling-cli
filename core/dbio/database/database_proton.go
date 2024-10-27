@@ -115,8 +115,7 @@ func (conn *ProtonConn) Init() error {
 	conn.retryBackoff = backoff.NewExponentialBackOff()
 	conn.retryBackoff.MaxElapsedTime = 5 * time.Minute
 	conn.retryBackoff.InitialInterval = 1 * time.Second
-	conn.retryBackoff.MaxInterval = 10 * time.Second
-	conn.retryBackoff.Multiplier = 2.0
+
 
 	return conn.BaseConn.Init()
 }
