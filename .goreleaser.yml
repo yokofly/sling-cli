@@ -45,5 +45,5 @@ changelog:
 release:
   prerelease: auto
   github:
-    owner: timeplus-io
+    owner: yokofly
     name: sling-cli
